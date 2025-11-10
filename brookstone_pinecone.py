@@ -97,7 +97,10 @@ def ensure_conversation_state(from_phone):
             "language": "english", 
             "waiting_for": None,
             "last_context_topics": [],
-            "user_interests": []
+            "user_interests": [],
+            "last_follow_up": None,  # Store the last follow-up question asked
+            "follow_up_context": None,  # Store context for the follow-up
+            "is_first_message": True  # Track if this is the first interaction
         }
     else:
         # Ensure all required fields exist
@@ -107,6 +110,12 @@ def ensure_conversation_state(from_phone):
             CONV_STATE[from_phone]["last_context_topics"] = []
         if "user_interests" not in CONV_STATE[from_phone]:
             CONV_STATE[from_phone]["user_interests"] = []
+        if "last_follow_up" not in CONV_STATE[from_phone]:
+            CONV_STATE[from_phone]["last_follow_up"] = None
+        if "follow_up_context" not in CONV_STATE[from_phone]:
+            CONV_STATE[from_phone]["follow_up_context"] = None
+        if "is_first_message" not in CONV_STATE[from_phone]:
+            CONV_STATE[from_phone]["is_first_message"] = True
 
 def analyze_user_interests(message_text, state):
     """Analyze user message to understand their interests"""
@@ -214,6 +223,15 @@ def process_incoming_message(from_phone, message_text, message_id):
     state["language"] = "gujarati" if guj else "english"
     state["chat_history"].append({"role": "user", "content": message_text})
 
+    # Check if this is the first message and send welcome
+    if state.get("is_first_message", True):
+        state["is_first_message"] = False
+        welcome_text = "Hello! Welcome to Brookstone. How could I assist you today?"
+        if state["language"] == "gujarati":
+            welcome_text = translate_english_to_gujarati(welcome_text)
+        send_whatsapp_text(from_phone, welcome_text)
+        return
+
     # Analyze user interests for better follow-up questions
     current_interests = analyze_user_interests(message_text, state)
     
@@ -226,6 +244,7 @@ def process_incoming_message(from_phone, message_text, message_id):
     if state.get("waiting_for") == "location_confirmation":
         if any(word in message_lower for word in ["yes", "yeah", "yep", "sure", "please", "ok", "okay", "send", "हाँ", "હા"]):
             state["waiting_for"] = None
+            state["last_follow_up"] = None  # Clear previous follow-up
             send_whatsapp_location(from_phone)
             confirmation_text = "📍 Here's our location! We're open from 10:30 AM to 7:00 PM. Looking forward to see you! 😊"
             if state["language"] == "gujarati":
@@ -234,6 +253,7 @@ def process_incoming_message(from_phone, message_text, message_id):
             return
         elif any(word in message_lower for word in ["no", "nope", "not now", "later", "નહીં", "ના"]):
             state["waiting_for"] = None
+            state["last_follow_up"] = None  # Clear previous follow-up
             decline_text = "No problem! Feel free to ask if you need anything else. You can contact our agents at 8238477697 or 9974812701 anytime! 😊"
             if state["language"] == "gujarati":
                 decline_text = translate_english_to_gujarati(decline_text)
@@ -244,6 +264,7 @@ def process_incoming_message(from_phone, message_text, message_id):
     if state.get("waiting_for") == "brochure_confirmation":
         if any(word in message_lower for word in ["yes", "yeah", "yep", "sure", "please", "send", "brochure", "pdf", "हाँ", "હા"]):
             state["waiting_for"] = None
+            state["last_follow_up"] = None  # Clear previous follow-up
             send_whatsapp_document(from_phone)
             brochure_text = "📄 Here's your Brookstone brochure! It has all the details about our luxury 3&4BHK flats. Any questions after going through it? 😊"
             if state["language"] == "gujarati":
@@ -252,6 +273,7 @@ def process_incoming_message(from_phone, message_text, message_id):
             return
         elif any(word in message_lower for word in ["no", "not now", "later", "નહીં", "ના"]):
             state["waiting_for"] = None
+            state["last_follow_up"] = None  # Clear previous follow-up
             later_text = "Sure! Let me know if you'd like the brochure later or have any other questions about Brookstone. 😊"
             if state["language"] == "gujarati":
                 later_text = translate_english_to_gujarati(later_text)
@@ -263,6 +285,7 @@ def process_incoming_message(from_phone, message_text, message_id):
         # Check if user wants layout/details
         if any(word in message_lower for word in ["layout", "details", "size", "area", "plan", "floor", "design", "લેઆઉટ", "વિગત"]):
             state["waiting_for"] = "brochure_confirmation"
+            state["last_follow_up"] = None  # Clear previous follow-up
             clarify_text = "Great! Would you like me to send you our detailed brochure with all floor plans and specifications?"
             if state["language"] == "gujarati":
                 clarify_text = translate_english_to_gujarati(clarify_text)
@@ -271,6 +294,7 @@ def process_incoming_message(from_phone, message_text, message_id):
         # Check if user wants site visit
         elif any(word in message_lower for word in ["visit", "site", "see", "tour", "book", "appointment", "schedule", "મુલાકાત", "સાઇટ"]):
             state["waiting_for"] = None
+            state["last_follow_up"] = None  # Clear previous follow-up
             visit_text = "Perfect! Please contact *Mr. Nilesh at 7600612701* to book your site visit. He'll help you schedule a convenient time."
             if state["language"] == "gujarati":
                 visit_text = translate_english_to_gujarati(visit_text)
@@ -309,8 +333,13 @@ def process_incoming_message(from_phone, message_text, message_id):
         # Store current context topics for future reference
         state["last_context_topics"] = [d.metadata.get("topic", "") for d in docs if d.metadata.get("topic")]
 
-        # Enhanced system prompt with user context
-        user_context = f"User's previous interests: {', '.join(state['user_interests'])}" if state['user_interests'] else "First interaction"
+        # Enhanced system prompt with user context and memory
+        user_context = f"User's previous interests: {', '.join(state['user_interests'])}" if state['user_interests'] else "New conversation"
+        
+        # Include memory of last follow-up question
+        follow_up_memory = ""
+        if state.get("last_follow_up"):
+            follow_up_memory = f"\nRECENT FOLLOW-UP: I recently asked '{state['last_follow_up']}' and user is now responding to that question."
         
         # Determine language for system prompt
         language_instruction = ""
@@ -328,6 +357,9 @@ CORE INSTRUCTIONS:
 - Use 1 emoji maximum
 - Keep responses WhatsApp-friendly
 - Do NOT invent details
+- Remember conversation flow and previous follow-ups
+
+MEMORY CONTEXT: {follow_up_memory}
 
 SPECIAL HANDLING:
 
@@ -342,19 +374,22 @@ SPECIAL HANDLING:
 5. LOCATION REQUEST: "Would you like me to send you our location?"
 
 FOLLOW-UP STRATEGY:
-- After answering, ask ONE simple follow-up question
-- If asking multiple options, use format: "Would you like to know about [option1] or [option2]?"
-- This helps clarify user intent when they give ambiguous responses like "sure"
+- If user is responding to a previous follow-up question, acknowledge it and provide relevant information
+- After answering, ask ONE simple follow-up question to continue conversation
+- Make follow-ups natural and contextual
+- This helps maintain conversation flow
 
 RESPONSE PATTERN:
-1. Give brief answer from context
-2. Ask ONE clear follow-up question with specific options
+1. If responding to previous follow-up, acknowledge and answer appropriately
+2. Give brief answer from context
+3. Ask ONE clear follow-up question to keep conversation flowing
 
 USER CONTEXT: {user_context}
 
-Example:
-User: "Tell me about 3BHK"
-Response: "Yes, we have 3BHK options available! Would you like to know about the layout details or schedule a site visit? 😊"
+CONVERSATION FLOW:
+- If user is answering my previous question, provide relevant info based on their response
+- Then naturally continue with another relevant question
+- Keep the conversation engaging and helpful
 
 ---
 Available Knowledge Context:
@@ -362,7 +397,7 @@ Available Knowledge Context:
 
 User Question: {search_query}
 
-Provide a brief answer and ask ONE clear follow-up question.
+Provide a brief answer and ask ONE relevant follow-up question.
 Assistant:
         """.strip()
 
@@ -377,6 +412,20 @@ Assistant:
 
         # --- Send primary text response ---
         send_whatsapp_text(from_phone, final_response)
+
+        # Store the follow-up question asked by the bot for memory
+        # Extract follow-up question from response (look for question marks)
+        sentences = final_response.split('.')
+        follow_up_question = None
+        for sentence in sentences:
+            if '?' in sentence:
+                follow_up_question = sentence.strip()
+                break
+        
+        if follow_up_question:
+            state["last_follow_up"] = follow_up_question
+            state["follow_up_context"] = context[:500]  # Store some context for reference
+            logging.info(f"🧠 Stored follow-up: {follow_up_question}")
 
         # --- Set conversation states based on bot's response ---
         response_lower = response.lower()  # Use original English response for state detection
