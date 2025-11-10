@@ -7,8 +7,6 @@ from dotenv import load_dotenv
 from langchain_pinecone import PineconeVectorStore
 from langchain_community.embeddings import OpenAIEmbeddings
 from langchain_openai import ChatOpenAI
-import json
-from datetime import datetime, timedelta
 
 load_dotenv()
 
@@ -24,106 +22,6 @@ VERIFY_TOKEN = os.getenv("VERIFY_TOKEN", "brookstone_verify_token_2024")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 BROCHURE_URL = os.getenv("BROCHURE_URL", "https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/BROOKSTONE.pdf")
-
-# Media state file - stores last uploaded media_id and timestamp
-MEDIA_STATE_FILE = os.path.join(os.path.dirname(__file__), "media_state.json")
-MEDIA_ID = None
-MEDIA_EXPIRY_DAYS = 29  # refresh media every 29 days
-
-
-def load_media_state():
-    """Load media state (media_id and uploaded_at) from file."""
-    try:
-        if os.path.exists(MEDIA_STATE_FILE):
-            with open(MEDIA_STATE_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-    except Exception as e:
-        logging.error(f"❌ Error loading media state: {e}")
-    return {}
-
-
-def save_media_state(state: dict):
-    try:
-        with open(MEDIA_STATE_FILE, "w", encoding="utf-8") as f:
-            json.dump(state, f)
-    except Exception as e:
-        logging.error(f"❌ Error saving media state: {e}")
-
-
-def _find_brochure_file():
-    # common locations
-    candidates = [
-        os.path.join(os.path.dirname(__file__), "static", "brochure", "BROOKSTONE.pdf"),
-        os.path.join(os.path.dirname(__file__), "static", "BROCHURE.pdf"),
-        os.path.join(os.path.dirname(__file__), "BROOKSTONE.pdf"),
-    ]
-    for c in candidates:
-        if os.path.exists(c):
-            return c
-    return None
-
-
-def upload_brochure_media():
-    """Upload brochure PDF to WhatsApp Cloud and store media id."""
-    global MEDIA_ID
-    file_path = _find_brochure_file()
-    if not file_path:
-        logging.error("❌ Brochure file not found in static folders. Skipping media upload.")
-        return None
-
-    url = f"https://graph.facebook.com/v23.0/{WHATSAPP_PHONE_NUMBER_ID}/media"
-    headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}"}
-    data = {"messaging_product": "whatsapp"}
-    try:
-        with open(file_path, "rb") as fh:
-            files = {"file": (os.path.basename(file_path), fh, "application/pdf")}
-            resp = requests.post(url, headers=headers, data=data, files=files, timeout=60)
-        if resp.status_code == 200:
-            j = resp.json()
-            new_media_id = j.get("id")
-            if new_media_id:
-                MEDIA_ID = new_media_id
-                state = {"media_id": MEDIA_ID, "uploaded_at": datetime.utcnow().isoformat()}
-                save_media_state(state)
-                logging.info(f"✅ Uploaded brochure media, id={MEDIA_ID}")
-                return MEDIA_ID
-            else:
-                logging.error(f"❌ Upload succeeded but no media id returned: {resp.text}")
-        else:
-            logging.error(f"❌ Failed to upload media: {resp.status_code} - {resp.text}")
-    except Exception as e:
-        logging.error(f"❌ Exception uploading media: {e}")
-    return None
-
-
-def ensure_media_up_to_date():
-    """Ensure we have a media_id and it's not expired (older than MEDIA_EXPIRY_DAYS)."""
-    global MEDIA_ID
-    state = load_media_state()
-    media_id = state.get("media_id")
-    uploaded_at = state.get("uploaded_at")
-    need_upload = True
-    if media_id and uploaded_at:
-        try:
-            uploaded_dt = datetime.fromisoformat(uploaded_at)
-            if datetime.utcnow() - uploaded_dt < timedelta(days=MEDIA_EXPIRY_DAYS):
-                MEDIA_ID = media_id
-                need_upload = False
-                logging.info(f"ℹ️ Using existing media_id (uploaded {uploaded_at})")
-        except Exception:
-            need_upload = True
-
-    if need_upload:
-        logging.info("ℹ️ Uploading brochure media to WhatsApp Cloud (initial/refresh)")
-        upload_brochure_media()
-
-
-# Initialize media state at startup (without scheduler)
-try:
-    ensure_media_up_to_date()
-    logging.info(f"� Media management initialized. Use refresh_media.py for 29-day renewals.")
-except Exception as e:
-    logging.error(f"❌ Error initializing media: {e}")
 
 if not OPENAI_API_KEY or not PINECONE_API_KEY:
     logging.error("❌ Missing API keys!")
@@ -289,26 +187,14 @@ def send_whatsapp_location(to_phone):
         logging.error(f"❌ Error sending location: {e}")
 
 def send_whatsapp_document(to_phone, caption="Here is your Brookstone Brochure 📄"):
-    # If we have a valid MEDIA_ID, send the document by media id, otherwise fallback to link
     url = f"https://graph.facebook.com/v23.0/{WHATSAPP_PHONE_NUMBER_ID}/messages"
     headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
-
-    if MEDIA_ID:
-        payload = {
-            "messaging_product": "whatsapp",
-            "to": to_phone,
-            "type": "document",
-            "document": {"id": MEDIA_ID, "caption": caption, "filename": "Brookstone_Brochure.pdf"}
-        }
-    else:
-        # fallback to sending by link if media id is not available
-        payload = {
-            "messaging_product": "whatsapp",
-            "to": to_phone,
-            "type": "document",
-            "document": {"link": BROCHURE_URL, "caption": caption, "filename": "Brookstone_Brochure.pdf"}
-        }
-
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": to_phone,
+        "type": "document",
+        "document": {"link": BROCHURE_URL, "caption": caption, "filename": "Brookstone_Brochure.pdf"}
+    }
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=15)
         if response.status_code == 200:
