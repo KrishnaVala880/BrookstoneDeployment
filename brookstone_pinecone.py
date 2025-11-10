@@ -174,11 +174,11 @@ def translate_english_to_gujarati(text):
     """Translate English text to Gujarati"""
     try:
         translation_prompt = f"""
-Translate the following English text to Gujarati. Keep the same tone and style. Provide only the Gujarati translation, nothing else.
+Translate the following English text to Gujarati. Keep the same tone, style, and LENGTH - make it brief and concise like the original. Provide only the Gujarati translation, nothing else.
 
 English text: {text}
 
-Gujarati translation:
+Gujarati translation (keep it brief and concise):
         """
         response = translator_llm.invoke(translation_prompt)
         return response.content.strip()
@@ -458,7 +458,7 @@ def process_incoming_message(from_phone, message_text, message_id):
         # Determine language for system prompt
         language_instruction = ""
         if state["language"] == "gujarati":
-            language_instruction = "IMPORTANT: User is asking in Gujarati. Respond in ENGLISH first, then it will be translated to Gujarati automatically."
+            language_instruction = "IMPORTANT: User is asking in Gujarati. Respond in ENGLISH first (keep it VERY SHORT), then it will be translated to Gujarati automatically. The Gujarati translation should also be brief and concise."
         
         system_prompt = f"""
 You are a friendly real estate assistant for Brookstone project. Be conversational, natural, and convincing.
