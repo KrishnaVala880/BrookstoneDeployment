@@ -1,6 +1,8 @@
 flask
 requests
 python-dotenv
+langchain
 langchain-pinecone
 langchain-community
 langchain-openai
+pinecone-client
