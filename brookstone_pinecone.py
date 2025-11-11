@@ -19,21 +19,28 @@ import requests
 # Environment Variables
 from dotenv import load_dotenv
 
-# LangChain Core Components
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
-from langchain_core.prompts import PromptTemplate
+# LangChain imports - support multiple package layouts (langchain vs langchain_core)
+try:
+    # preferred: modern `langchain` package
+    from langchain.prompts import PromptTemplate
+except Exception:
+    # fallback for environments that still have split packages
+    from langchain_core.prompts import PromptTemplate
 
 # LangChain OpenAI Integration
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
-# Pinecone Vector Store
+# Pinecone Vector Store (langchain-community wrapper)
 from langchain_community.vectorstores import Pinecone as LangchainPinecone
 
-# LangChain Core for memory and chains
-from langchain_core.memory import BaseMemory
-from langchain_core.chat_history import BaseChatMessageHistory
-from langchain_core.messages import BaseMessage
-from langchain_community.chat_message_histories import ChatMessageHistory
+# Chat message history: prefer langchain_community; fall back to langchain.memory location
+try:
+    from langchain_community.chat_message_histories import ChatMessageHistory
+except Exception:
+    try:
+        from langchain.memory.chat_message_histories import ChatMessageHistory
+    except Exception:
+        ChatMessageHistory = None
 
 # Load environment variables
 load_dotenv()
