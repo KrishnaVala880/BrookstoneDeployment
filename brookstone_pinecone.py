@@ -20,8 +20,8 @@ import requests
 from dotenv import load_dotenv
 
 # LangChain Core Components
-from langchain.schema import BaseMessage, HumanMessage, AIMessage
-from langchain.prompts import PromptTemplate
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
+from langchain_core.prompts import PromptTemplate
 
 # LangChain OpenAI Integration
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
