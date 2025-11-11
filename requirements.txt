@@ -5,13 +5,11 @@ python-dotenv==1.0.0
 
 # LangChain - Use stable compatible versions
 langchain==0.1.20
-langchain-core==0.1.52
-langchain-community==0.0.38
 langchain-openai==0.1.8
+langchain-community==0.0.38
 
-# Vector Store - Use compatible pinecone versions
-langchain-pinecone==0.1.1
-pinecone-client==3.2.2
+# Vector Store - Use direct pinecone
+pinecone-client==2.2.4
 
 # OpenAI
 openai==1.35.5

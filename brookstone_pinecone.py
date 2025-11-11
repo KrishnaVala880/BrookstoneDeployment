@@ -26,8 +26,9 @@ from langchain.prompts import PromptTemplate
 # LangChain OpenAI Integration
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
-# LangChain Vector Store
-from langchain_pinecone import PineconeVectorStore
+# Pinecone Vector Store
+from pinecone import Pinecone
+from langchain_community.vectorstores import Pinecone as LangchainPinecone
 
 # LangChain Memory Components
 from langchain.memory import (
@@ -191,10 +192,12 @@ if not OPENAI_API_KEY or not PINECONE_API_KEY:
 # ================================================
 # PINECONE SETUP
 # ================================================
-def load_vectorstore() -> PineconeVectorStore:
+def load_vectorstore() -> LangchainPinecone:
     """Initialize Pinecone vector store."""
     embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
-    return PineconeVectorStore(index_name=INDEX_NAME, embedding=embeddings)
+    pc = Pinecone(api_key=PINECONE_API_KEY)
+    index = pc.Index(INDEX_NAME)
+    return LangchainPinecone(index, embeddings)
 
 
 # Initialize vectorstore and retriever
