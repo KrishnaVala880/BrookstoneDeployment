@@ -369,6 +369,38 @@ def analyze_user_interests(message_text, state):
     
     return interests
 
+def detect_location_request_with_gemini(message_text):
+    """Use Gemini to intelligently detect if user is asking for location/address"""
+    try:
+        if not gemini_model:
+            return False
+        
+        location_detection_prompt = f"""
+Analyze this message and determine if the user is asking for location, address, or directions to a property/site.
+
+User Message: "{message_text}"
+
+Consider these as location requests:
+- Asking for address, location, directions
+- "Where is it located?"
+- "Can you share the location?"
+- "What's the address?"
+- "How to reach there?"
+- Similar location-related queries in any language
+
+Respond with only "YES" if it's a location request, or "NO" if it's not.
+        """
+        
+        response = gemini_model.generate_content(location_detection_prompt)
+        result = response.text.strip().upper()
+        
+        logging.info(f"🗺️ Location request detection: '{message_text[:30]}...' → {result}")
+        return result == "YES"
+        
+    except Exception as e:
+        logging.error(f"❌ Error in location detection: {e}")
+        return False
+
 def analyze_user_interests_with_gemini(message_text, state):
     """Enhanced user interest analysis using Gemini AI"""
     try:
@@ -526,6 +558,24 @@ def process_incoming_message(from_phone, message_text, message_id):
         send_whatsapp_text(from_phone, welcome_text)
         return
 
+    # 🗺️ PRIORITY: Check for location requests first (using Gemini AI detection)
+    if detect_location_request_with_gemini(message_text):
+        logging.info(f"🗺️ Location request detected from {from_phone}, sending location pin only")
+        send_whatsapp_location(from_phone)
+        return
+
+    # 📄 PRIORITY: Check for direct brochure requests
+    brochure_keywords = ["brochure", "pdf", "document", "file", "download", "send", "details", "ब्रोशर", "બ્રોશર"]
+    if any(keyword in message_text.lower() for keyword in brochure_keywords):
+        if any(word in message_text.lower() for word in ["send", "share", "give", "want", "need", "show", "મોકલો", "આપો"]):
+            logging.info(f"📄 Direct brochure request detected from {from_phone}")
+            send_whatsapp_document(from_phone)
+            brochure_sent_text = "📄 Here's your Brookstone brochure with complete details! ✨ Any questions after reviewing it? 🏠😊"
+            if state["language"] == "gujarati":
+                brochure_sent_text = translate_english_to_gujarati(brochure_sent_text)
+            send_whatsapp_text(from_phone, brochure_sent_text)
+            return
+
     # Analyze user interests for better follow-up questions (using Gemini)
     current_interests = analyze_user_interests_with_gemini(message_text, state)
     
@@ -534,33 +584,13 @@ def process_incoming_message(from_phone, message_text, message_id):
     # Check for follow-up responses
     message_lower = message_text.lower().strip()
     
-    # Handle location confirmation
-    if state.get("waiting_for") == "location_confirmation":
-        if any(word in message_lower for word in ["yes", "yeah", "yep", "sure", "please", "ok", "okay", "send", "हाँ", "હા"]):
-            state["waiting_for"] = None
-            state["last_follow_up"] = None  # Clear previous follow-up
-            send_whatsapp_location(from_phone)
-            confirmation_text = "📍 Here's our location! We're open from 10:30 AM to 7:00 PM. Looking forward to see you! 🏠✨"
-            if state["language"] == "gujarati":
-                confirmation_text = translate_english_to_gujarati(confirmation_text)
-            send_whatsapp_text(from_phone, confirmation_text)
-            return
-        elif any(word in message_lower for word in ["no", "nope", "not now", "later", "નહીં", "ના"]):
-            state["waiting_for"] = None
-            state["last_follow_up"] = None  # Clear previous follow-up
-            decline_text = "No problem! Feel free to ask if you need anything else. You can contact our agents at 8238477697 or 9974812701 anytime! ��😊"
-            if state["language"] == "gujarati":
-                decline_text = translate_english_to_gujarati(decline_text)
-            send_whatsapp_text(from_phone, decline_text)
-            return
-    
     # Handle brochure confirmation
     if state.get("waiting_for") == "brochure_confirmation":
-        if any(word in message_lower for word in ["yes", "yeah", "yep", "sure", "please", "send", "brochure", "pdf", "हाँ", "હા"]):
+        if any(word in message_lower for word in ["yes", "yeah", "yep", "sure", "please", "send", "brochure", "pdf", "ok", "okay", "हाँ", "હા", "જી", "આપો"]):
             state["waiting_for"] = None
             state["last_follow_up"] = None  # Clear previous follow-up
             send_whatsapp_document(from_phone)
-            brochure_text = "📄 Here's your Brookstone brochure! It has all the details about our luxury 3&4BHK flats. Any questions after going through it? ✨😊"
+            brochure_text = "📄 Here's your Brookstone brochure! It has all the details you need. Any questions after going through it? ✨😊"
             if state["language"] == "gujarati":
                 brochure_text = translate_english_to_gujarati(brochure_text)
             send_whatsapp_text(from_phone, brochure_text)
@@ -675,17 +705,31 @@ CORE INSTRUCTIONS:
 - Remember conversation flow and previous follow-ups
 - ALWAYS try to convince user in a friendly way
 - Use the conversation memory and user preferences provided
+- Be NATURAL and CONTEXTUAL - don't repeat the same phrases in every response
+- Only mention flat types (3&4BHK) when user specifically asks about them
 
 MEMORY CONTEXT: {follow_up_memory}{conversation_context}{preferences_context}
 
-MANDATORY FLAT MENTIONS:
-- ALWAYS say "Brookstone offers luxurious 3&4BHK flats" (mention both types)
-- Even if user asks only about 3BHK or 4BHK, mention both options
-- This showcases our complete offering
+SMART FLAT MENTIONS:
+- ONLY mention "Brookstone offers luxurious 3&4BHK flats" when user specifically asks about:
+  * Flat types/configurations (3BHK, 4BHK)
+  * "What do you have?" / "What's available?"
+  * Property types or unit options
+  * First-time inquiries about the project
+- Whether user asks about 3BHK or whether user asks about 4BHK, mention both types "We have luxurious 3&4BHK flats available to Brookstone!"
+- Do NOT force this phrase into every response - be natural and contextual
+- For queries about amenities, location, pricing, etc. - just answer directly without mentioning flat types
+
+BROCHURE STRATEGY:
+- ACTIVELY offer brochure when user shows interest in details, layout, floor plans, specifications, amenities
+- Use phrases like "Would you like me to send you our detailed brochure?" 
+- The brochure contains complete information about Brookstone's luxury offerings
+- Make brochure sound valuable and comprehensive
+- Offer brochure for queries about layouts, floor plans, unit details, specifications
 
 SPECIAL HANDLING:
 
-1. TIMINGS: "Our site office is open from *10:30 AM to 7:00 PM* every day. Would you like me to send you the location? 📍"
+1. TIMINGS: "Our site office is open from *10:30 AM to 7:00 PM* every day. �"
 
 2. SITE VISIT BOOKING: "Perfect! Please contact *Mr. Nilesh at 7600612701* to book your site visit. 📞✨"
 
@@ -693,7 +737,9 @@ SPECIAL HANDLING:
 
 4. PRICING: Check context first. If no pricing info: "For latest pricing details, please contact our agents at 8238477697 or 9974812701. 💰📞"
 
-5. LOCATION REQUEST: "Would you like me to send you our location? 📍🏠"
+5. BROCHURE OFFERING: When user asks about details/layout/plans/amenities/specifications: "Would you like me to send you our detailed brochure with all floor plans and specifications? 📄✨"
+
+IMPORTANT: Do NOT handle location/address requests here - they are processed separately and will send location pin automatically.
 
 CONVINCING STRATEGY:
 - Use positive, enthusiastic language
@@ -720,15 +766,21 @@ CONVERSATION FLOW:
 - Keep the conversation engaging and helpful
 - Always sound excited about Brookstone!
 
-Example Responses:
-- "Absolutely! Brookstone offers luxurious 3&4BHK flats 🏠✨ Would you like to know about the premium amenities? 🌟"
-- "Great choice! Our 4BHK units are part of Brookstone's luxurious 3&4BHK collection 💎 Interested in the spacious layouts? 📐"
+Example Responses (be contextual, not repetitive):
+- When user asks about flat types: "Yes! Brookstone offers luxurious 3&4BHK flats 🏠✨ Which one interests you more? 🌟"
+- When user asks about amenities: "We have amazing amenities including [specific amenities] 💎 Would you like to know more details? 📐"
+- When user asks about location: "Great location with excellent connectivity! 🗺️ Any other questions about the project? ✨"
+- When user asks about pricing: "Let me connect you with our pricing team � Meanwhile, interested in seeing our floor plans? 📄"
+
+Remember: Only mention 3&4BHK when it's actually relevant to the user's question!
 
 ---
 Available Knowledge Context:
 {context}
 
 User Question: {search_query}
+
+IMPORTANT: Be natural and contextual. Don't force "Brookstone offers luxurious 3&4BHK flats" into every response. Only mention flat types when the user specifically asks about configurations, availability, or what types of units you have.
 
 Provide a brief, convincing answer with good emojis and ask ONE relevant follow-up question.
 Assistant:
@@ -771,13 +823,8 @@ Assistant:
         # --- Set conversation states based on bot's response ---
         response_lower = response.lower()  # Use original English response for state detection
         
-        # Check if bot is asking for location confirmation
-        if "would you like me to send" in response_lower and "location" in response_lower:
-            state["waiting_for"] = "location_confirmation"
-            logging.info(f"🎯 Set state to location_confirmation for {from_phone}")
-        
         # Check if bot is asking multiple choice question (layout or site visit)
-        elif ("layout" in response_lower or "details" in response_lower) and ("site visit" in response_lower or "schedule" in response_lower):
+        if ("layout" in response_lower or "details" in response_lower) and ("site visit" in response_lower or "schedule" in response_lower):
             state["waiting_for"] = "clarification_needed"
             logging.info(f"🎯 Set state to clarification_needed for {from_phone}")
         
@@ -796,12 +843,9 @@ Assistant:
             # Bot already provided agent contact info, no state change needed
             logging.info(f"📞 Agent contact info provided to {from_phone}")
 
-        # Legacy intent detection for immediate actions (without confirmation)
-        if re.search(r"\bsend.*location\b|\bhere.*location\b", response_lower) and state.get("waiting_for") != "location_confirmation":
-            logging.info(f"📍 Legacy location trigger for {from_phone}")
-            send_whatsapp_location(from_phone)
-
-        elif re.search(r"\bhere.*brochure\b|\bsending.*brochure\b", response_lower) and state.get("waiting_for") != "brochure_confirmation":
+        # Legacy intent detection for immediate actions (without confirmation) 
+        # Note: Location requests are now handled separately by Gemini detection
+        if re.search(r"\bhere.*brochure\b|\bsending.*brochure\b", response_lower) and state.get("waiting_for") != "brochure_confirmation":
             logging.info(f"📄 Legacy brochure trigger for {from_phone}")
             send_whatsapp_document(from_phone)
 
