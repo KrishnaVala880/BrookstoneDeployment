@@ -27,6 +27,10 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # Keep for Pinecone embeddings
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 BROCHURE_URL = os.getenv("BROCHURE_URL", "https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/BROOKSTONE.pdf")
 
+# >>> Added for WorkVEU CRM Integration <<<
+WORKVEU_WEBHOOK_URL = os.getenv("WORKVEU_WEBHOOK_URL")
+WORKVEU_API_KEY = os.getenv("WORKVEU_API_KEY")
+
 # Media state file - stores last uploaded media_id and timestamp
 MEDIA_STATE_FILE = os.path.join(os.path.dirname(__file__), "media_state.json")
 MEDIA_ID = None
@@ -543,6 +547,36 @@ def mark_message_as_read(message_id):
         logging.error(f"Error marking message as read: {e}")
 
 # ================================================
+# WORKVEU CRM INTEGRATION
+# ================================================
+def push_to_workveu(name, wa_id, message_text, direction="inbound"):
+    """Push chat messages to WorkVEU CRM for admin monitoring"""
+    if not WORKVEU_WEBHOOK_URL or not WORKVEU_API_KEY:
+        logging.warning("⚠️ WorkVEU integration skipped: Missing WORKVEU_WEBHOOK_URL or WORKVEU_API_KEY in .env file.")
+        return
+
+    payload = {
+        "api_key": WORKVEU_API_KEY,
+        "contacts": [
+            {
+                "profile": {"name": name or "Unknown User"},
+                "wa_id": wa_id,
+                "remarks": f"[{direction.upper()}] {message_text}"
+            }
+        ]
+    }
+
+    try:
+        headers = {"Content-Type": "application/json"}
+        response = requests.post(WORKVEU_WEBHOOK_URL, headers=headers, json=payload, timeout=10)
+        if response.status_code == 200:
+            logging.info(f"✅ WorkVEU message synced ({direction}) for {wa_id}")
+        else:
+            logging.error(f"❌ WorkVEU sync failed: {response.status_code} - {response.text}")
+    except Exception as e:
+        logging.error(f"❌ Error pushing to WorkVEU: {e}")
+
+# ================================================
 # MESSAGE PROCESSING
 # ================================================
 def process_incoming_message(from_phone, message_text, message_id):
@@ -578,6 +612,9 @@ def process_incoming_message(from_phone, message_text, message_id):
     
     state["chat_history"].append({"role": "user", "content": message_text})
 
+    # >>> Added for WorkVEU CRM Integration <<<
+    push_to_workveu(name=None, wa_id=from_phone, message_text=message_text, direction="inbound")
+
     # Check if this is the first message and send welcome
     if state.get("is_first_message", True):
         state["is_first_message"] = False
@@ -585,6 +622,9 @@ def process_incoming_message(from_phone, message_text, message_id):
         if state["language"] == "gujarati":
             welcome_text = translate_english_to_gujarati(welcome_text)
         send_whatsapp_text(from_phone, welcome_text)
+        
+        # >>> Added for WorkVEU CRM Integration <<<
+        push_to_workveu(name="Brookstone Bot", wa_id=from_phone, message_text=welcome_text, direction="outbound")
         return
 
     # 🗺️ PRIORITY: Check for location requests first (using Gemini AI detection)
@@ -606,6 +646,9 @@ def process_incoming_message(from_phone, message_text, message_id):
         if state["language"] == "gujarati":
             brochure_sent_text = translate_english_to_gujarati(brochure_sent_text)
         send_whatsapp_text(from_phone, brochure_sent_text)
+        
+        # >>> Added for WorkVEU CRM Integration <<<
+        push_to_workveu(name="Brookstone Bot", wa_id=from_phone, message_text=f"📄 Brochure sent + {brochure_sent_text}", direction="outbound")
         return
     
     # Check for English brochure requests
@@ -617,6 +660,9 @@ def process_incoming_message(from_phone, message_text, message_id):
             if state["language"] == "gujarati":
                 brochure_sent_text = translate_english_to_gujarati(brochure_sent_text)
             send_whatsapp_text(from_phone, brochure_sent_text)
+            
+            # >>> Added for WorkVEU CRM Integration <<<
+            push_to_workveu(name="Brookstone Bot", wa_id=from_phone, message_text=f"📄 Brochure sent + {brochure_sent_text}", direction="outbound")
             return
 
     # Analyze user interests for better follow-up questions (using Gemini)
@@ -637,14 +683,20 @@ def process_incoming_message(from_phone, message_text, message_id):
             if state["language"] == "gujarati":
                 brochure_text = translate_english_to_gujarati(brochure_text)
             send_whatsapp_text(from_phone, brochure_text)
+            
+            # >>> Added for WorkVEU CRM Integration <<<
+            push_to_workveu(name="Brookstone Bot", wa_id=from_phone, message_text=f"📄 Brochure sent + {brochure_text}", direction="outbound")
             return
         elif any(word in message_lower for word in ["no", "not now", "later", "નહીં", "ના"]):
             state["waiting_for"] = None
             state["last_follow_up"] = None  # Clear previous follow-up
-            later_text = "Sure! Let me know if you'd like the brochure later or have any other questions about Brookstone. 🏠�"
+            later_text = "Sure! Let me know if you'd like the brochure later or have any other questions about Brookstone. 🏠😊"
             if state["language"] == "gujarati":
                 later_text = translate_english_to_gujarati(later_text)
             send_whatsapp_text(from_phone, later_text)
+            
+            # >>> Added for WorkVEU CRM Integration <<<
+            push_to_workveu(name="Brookstone Bot", wa_id=from_phone, message_text=later_text, direction="outbound")
             return
     
     # Handle ambiguous responses (when user says "sure" but it's unclear what they want)
@@ -657,6 +709,9 @@ def process_incoming_message(from_phone, message_text, message_id):
             if state["language"] == "gujarati":
                 clarify_text = translate_english_to_gujarati(clarify_text)
             send_whatsapp_text(from_phone, clarify_text)
+            
+            # >>> Added for WorkVEU CRM Integration <<<
+            push_to_workveu(name="Brookstone Bot", wa_id=from_phone, message_text=clarify_text, direction="outbound")
             return
         # Check if user wants site visit
         elif any(word in message_lower for word in ["visit", "site", "see", "tour", "book", "appointment", "schedule", "મુલાકાત", "સાઇટ"]):
@@ -666,6 +721,9 @@ def process_incoming_message(from_phone, message_text, message_id):
             if state["language"] == "gujarati":
                 visit_text = translate_english_to_gujarati(visit_text)
             send_whatsapp_text(from_phone, visit_text)
+            
+            # >>> Added for WorkVEU CRM Integration <<<
+            push_to_workveu(name="Brookstone Bot", wa_id=from_phone, message_text=visit_text, direction="outbound")
             return
         else:
             # If still unclear, ask again
@@ -674,6 +732,9 @@ def process_incoming_message(from_phone, message_text, message_id):
             if state["language"] == "gujarati":
                 unclear_text = translate_english_to_gujarati(unclear_text)
             send_whatsapp_text(from_phone, unclear_text)
+            
+            # >>> Added for WorkVEU CRM Integration <<<
+            push_to_workveu(name="Brookstone Bot", wa_id=from_phone, message_text=unclear_text, direction="outbound")
             return
 
     if not retriever:
@@ -681,6 +742,9 @@ def process_incoming_message(from_phone, message_text, message_id):
         if state["language"] == "gujarati":
             error_text = translate_english_to_gujarati(error_text)
         send_whatsapp_text(from_phone, error_text)
+        
+        # >>> Added for WorkVEU CRM Integration <<<
+        push_to_workveu(name="Brookstone Bot", wa_id=from_phone, message_text=error_text, direction="outbound")
         return
 
     try:
@@ -835,6 +899,9 @@ Assistant:
             if state["language"] == "gujarati":
                 error_text = translate_english_to_gujarati(error_text)
             send_whatsapp_text(from_phone, error_text)
+            
+            # >>> Added for WorkVEU CRM Integration <<<
+            push_to_workveu(name="Brookstone Bot", wa_id=from_phone, message_text=error_text, direction="outbound")
             return
 
         response = gemini_chat.invoke(system_prompt).content.strip()
@@ -848,6 +915,9 @@ Assistant:
 
         # --- Send primary text response ---
         send_whatsapp_text(from_phone, final_response)
+
+        # >>> Added for WorkVEU CRM Integration <<<
+        push_to_workveu(name="Brookstone Bot", wa_id=from_phone, message_text=final_response, direction="outbound")
 
         # Store the follow-up question asked by the bot for memory
         # Extract follow-up question from response (look for question marks)
@@ -903,6 +973,9 @@ Assistant:
         if state["language"] == "gujarati":
             error_text = translate_english_to_gujarati(error_text)
         send_whatsapp_text(from_phone, error_text)
+        
+        # >>> Added for WorkVEU CRM Integration <<<
+        push_to_workveu(name="Brookstone Bot", wa_id=from_phone, message_text=error_text, direction="outbound")
 
 # ================================================
 # WEBHOOK ROUTES
@@ -965,6 +1038,7 @@ def health():
         "whatsapp_configured": bool(WHATSAPP_TOKEN and WHATSAPP_PHONE_NUMBER_ID),
         "gemini_configured": bool(GEMINI_API_KEY and gemini_model and gemini_chat),
         "pinecone_configured": bool(PINECONE_API_KEY and openai_embeddings),
+        "workveu_configured": bool(WORKVEU_WEBHOOK_URL and WORKVEU_API_KEY),
         "hybrid_mode": "Gemini for chat, OpenAI for search"
     }), 200
 
