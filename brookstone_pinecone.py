@@ -10,10 +10,12 @@ import json
 from datetime import datetime, timedelta
 import google.generativeai as genai
 from langchain_community.embeddings import OllamaEmbeddings
-from pinecone import Pinecone, ServerlessSpec
+from pinecone import Pinecone
 
+# ================================================
+# INITIAL SETUP
+# ================================================
 load_dotenv()
-
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -26,8 +28,6 @@ VERIFY_TOKEN = os.getenv("VERIFY_TOKEN", "brookstone_verify_token_2024")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 BROCHURE_URL = os.getenv("BROCHURE_URL", "https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/BROOKSTONE.pdf")
-
-# WorkVEU CRM
 WORKVEU_WEBHOOK_URL = os.getenv("WORKVEU_WEBHOOK_URL")
 WORKVEU_API_KEY = os.getenv("WORKVEU_API_KEY")
 
@@ -35,7 +35,9 @@ MEDIA_STATE_FILE = os.path.join(os.path.dirname(__file__), "media_state.json")
 MEDIA_ID = None
 MEDIA_EXPIRY_DAYS = 29
 
-
+# ================================================
+# MEDIA MANAGEMENT
+# ================================================
 def load_media_state():
     try:
         if os.path.exists(MEDIA_STATE_FILE):
@@ -45,14 +47,12 @@ def load_media_state():
         logging.error(f"❌ Error loading media state: {e}")
     return {}
 
-
 def save_media_state(state: dict):
     try:
         with open(MEDIA_STATE_FILE, "w", encoding="utf-8") as f:
             json.dump(state, f)
     except Exception as e:
         logging.error(f"❌ Error saving media state: {e}")
-
 
 def _find_brochure_file():
     candidates = [
@@ -65,12 +65,11 @@ def _find_brochure_file():
             return c
     return None
 
-
 def upload_brochure_media():
     global MEDIA_ID
     file_path = _find_brochure_file()
     if not file_path:
-        logging.error("❌ Brochure file not found in static folders.")
+        logging.error("❌ Brochure file not found.")
         return None
 
     url = f"https://graph.facebook.com/v23.0/{WHATSAPP_PHONE_NUMBER_ID}/media"
@@ -90,13 +89,12 @@ def upload_brochure_media():
                 logging.info(f"✅ Uploaded brochure media, id={MEDIA_ID}")
                 return MEDIA_ID
             else:
-                logging.error(f"❌ Upload succeeded but no media id returned: {resp.text}")
+                logging.error(f"❌ No media id returned: {resp.text}")
         else:
             logging.error(f"❌ Failed to upload media: {resp.status_code} - {resp.text}")
     except Exception as e:
         logging.error(f"❌ Exception uploading media: {e}")
     return None
-
 
 def ensure_media_up_to_date():
     global MEDIA_ID
@@ -113,18 +111,15 @@ def ensure_media_up_to_date():
                 logging.info(f"ℹ️ Using existing media_id (uploaded {uploaded_at})")
         except Exception:
             need_upload = True
-
     if need_upload:
         logging.info("ℹ️ Uploading brochure media to WhatsApp Cloud")
         upload_brochure_media()
-
 
 try:
     ensure_media_up_to_date()
     logging.info(f"✅ Media management initialized.")
 except Exception as e:
     logging.error(f"❌ Error initializing media: {e}")
-
 
 # ================================================
 # GEMINI SETUP
@@ -134,7 +129,6 @@ if not GEMINI_API_KEY or not PINECONE_API_KEY:
 
 gemini_model = None
 gemini_chat = None
-
 try:
     genai.configure(api_key=GEMINI_API_KEY)
     gemini_model = genai.GenerativeModel("gemini-2.5-flash")
@@ -145,9 +139,8 @@ try:
 except Exception as e:
     logging.error(f"❌ Error initializing Gemini: {e}")
 
-
 # ================================================
-# OLLAMA + PINECONE RETRIEVAL SETUP (latest SDK)
+# OLLAMA + PINECONE RETRIEVAL SETUP (LATEST SDK)
 # ================================================
 INDEX_NAME = "brookstone-faq"
 
@@ -158,7 +151,6 @@ except Exception as e:
     logging.error(f"❌ Error initializing Ollama embeddings: {e}")
     ollama_embeddings = None
 
-# Create new Pinecone client (latest SDK)
 pc = None
 try:
     pc = Pinecone(api_key=PINECONE_API_KEY)
@@ -167,24 +159,18 @@ except Exception as e:
     logging.error(f"❌ Failed to create Pinecone client: {e}")
     pc = None
 
-
 def load_vectorstore():
-    """Connect to existing Pinecone index using new client."""
     if not ollama_embeddings:
         logging.error("❌ Ollama embeddings not available for Pinecone retrieval")
         return None
     if not pc:
         logging.error("❌ Pinecone client not initialized")
         return None
-
     try:
-        # Ensure index exists
         indexes = [idx["name"] for idx in pc.list_indexes()]
         if INDEX_NAME not in indexes:
-            logging.error(f"❌ Index '{INDEX_NAME}' not found in Pinecone. Available: {indexes}")
+            logging.error(f"❌ Index '{INDEX_NAME}' not found. Available: {indexes}")
             return None
-
-        # Connect to the existing index
         index = pc.Index(INDEX_NAME)
         vectorstore = PineconeVectorStore(index=index, embedding=ollama_embeddings)
         logging.info(f"✅ Connected to Pinecone index '{INDEX_NAME}' with Ollama embeddings")
@@ -192,7 +178,6 @@ def load_vectorstore():
     except Exception as e:
         logging.error(f"❌ Error connecting to Pinecone index: {e}")
         return None
-
 
 try:
     vectorstore = load_vectorstore()
@@ -206,9 +191,8 @@ except Exception as e:
     logging.error(f"❌ Error initializing retriever: {e}")
     retriever = None
 
-
 # ================================================
-# TRANSLATION FUNCTIONS
+# TRANSLATION HELPERS
 # ================================================
 def translate_gujarati_to_english(text):
     try:
@@ -221,7 +205,6 @@ def translate_gujarati_to_english(text):
         logging.error(f"Translation error: {e}")
         return text
 
-
 def translate_english_to_gujarati(text):
     try:
         if not gemini_model:
@@ -233,9 +216,56 @@ def translate_english_to_gujarati(text):
         logging.error(f"Translation error: {e}")
         return text
 
+# ================================================
+# WHATSAPP WEBHOOK ROUTES
+# ================================================
+@app.route("/webhook", methods=["GET"])
+def verify_webhook():
+    """Verification endpoint for WhatsApp Cloud API"""
+    mode = request.args.get("hub.mode")
+    token = request.args.get("hub.verify_token")
+    challenge = request.args.get("hub.challenge")
+    if mode == "subscribe" and token == VERIFY_TOKEN:
+        logging.info("✅ WEBHOOK VERIFIED SUCCESSFULLY")
+        return challenge, 200
+    else:
+        logging.warning("❌ Webhook verification failed.")
+        return "Forbidden", 403
+
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    """Handle incoming WhatsApp messages"""
+    data = request.get_json()
+    logging.info("📩 Incoming webhook payload")
+    try:
+        for entry in data.get("entry", []):
+            for change in entry.get("changes", []):
+                value = change.get("value", {})
+                messages = value.get("messages", [])
+                for message in messages:
+                    from_phone = message.get("from")
+                    msg_type = message.get("type")
+                    text = ""
+                    if msg_type == "text":
+                        text = message.get("text", {}).get("body", "")
+                    elif msg_type == "button":
+                        text = message.get("button", {}).get("text", "")
+                    elif msg_type == "interactive":
+                        interactive = message.get("interactive", {})
+                        if "button_reply" in interactive:
+                            text = interactive["button_reply"].get("title", "")
+                        elif "list_reply" in interactive:
+                            text = interactive["list_reply"].get("title", "")
+                    if not text:
+                        continue
+                    logging.info(f"📱 Message from {from_phone}: {text}")
+                    # Here you can later call your RAG retrieval + response logic
+    except Exception as e:
+        logging.exception("❌ Error processing webhook payload")
+    return jsonify({"status": "ok"}), 200
 
 # ================================================
-# HEALTH CHECK ROUTE
+# HEALTH CHECK
 # ================================================
 @app.route("/health", methods=["GET"])
 def health():
@@ -247,7 +277,6 @@ def health():
         "index_name": INDEX_NAME,
         "retriever_ready": bool(retriever)
     }), 200
-
 
 # ================================================
 # RUN APP
