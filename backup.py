@@ -27,6 +27,10 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # Keep for Pinecone embeddings
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 BROCHURE_URL = os.getenv("BROCHURE_URL", "https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/BROOKSTONE.pdf")
 
+# >>> Added for WorkVEU CRM Integration <<<
+WORKVEU_WEBHOOK_URL = os.getenv("WORKVEU_WEBHOOK_URL")
+WORKVEU_API_KEY = os.getenv("WORKVEU_API_KEY")
+
 # Media state file - stores last uploaded media_id and timestamp
 MEDIA_STATE_FILE = os.path.join(os.path.dirname(__file__), "media_state.json")
 MEDIA_ID = None
@@ -252,6 +256,76 @@ Gujarati translation (keep it brief and concise):
         return text  # Return original text if translation fails
 
 # ================================================
+# AREA INFORMATION DATABASE
+# ================================================
+AREA_INFO = {
+    "3bhk": {
+        "super_buildup": "2650 sqft",
+        "display_name": "3BHK"
+    },
+    "4bhk": {
+        "super_buildup": "3850 sqft", 
+        "display_name": "4BHK"
+    },
+    "3bhk_tower_duplex": {
+        "super_buildup": "5300 sqft + 700 sqft carpet terrace",
+        "display_name": "3BHK Tower Duplex"
+    },
+    "4bhk_tower_duplex": {
+        "super_buildup": "7700 sqft + 1000 sqft carpet terrace",
+        "display_name": "4BHK Tower Duplex" 
+    },
+    "3bhk_tower_simplex": {
+        "super_buildup": "2650 sqft + 700 sqft carpet terrace",
+        "display_name": "3BHK Tower Simplex"
+    },
+    "4bhk_tower_simplex": {
+        "super_buildup": "3850 sqft + 1000 sqft carpet terrace", 
+        "display_name": "4BHK Tower Simplex"
+    }
+}
+
+def get_area_information(query):
+    """Get area information from hardcoded database"""
+    query_lower = query.lower()
+    results = []
+    
+    # Check for specific unit types
+    if "tower duplex" in query_lower:
+        if "3bhk" in query_lower or "3 bhk" in query_lower:
+            results.append(f"{AREA_INFO['3bhk_tower_duplex']['display_name']}: {AREA_INFO['3bhk_tower_duplex']['super_buildup']}")
+        elif "4bhk" in query_lower or "4 bhk" in query_lower:
+            results.append(f"{AREA_INFO['4bhk_tower_duplex']['display_name']}: {AREA_INFO['4bhk_tower_duplex']['super_buildup']}")
+        else:
+            # If tower duplex mentioned but no specific BHK, show both tower duplex units
+            results.append(f"{AREA_INFO['3bhk_tower_duplex']['display_name']}: {AREA_INFO['3bhk_tower_duplex']['super_buildup']}")
+            results.append(f"{AREA_INFO['4bhk_tower_duplex']['display_name']}: {AREA_INFO['4bhk_tower_duplex']['super_buildup']}")
+    elif "tower simplex" in query_lower:
+        if "3bhk" in query_lower or "3 bhk" in query_lower:
+            results.append(f"{AREA_INFO['3bhk_tower_simplex']['display_name']}: {AREA_INFO['3bhk_tower_simplex']['super_buildup']}")
+        elif "4bhk" in query_lower or "4 bhk" in query_lower:
+            results.append(f"{AREA_INFO['4bhk_tower_simplex']['display_name']}: {AREA_INFO['4bhk_tower_simplex']['super_buildup']}")
+        else:
+            # If tower simplex mentioned but no specific BHK, show both tower simplex units
+            results.append(f"{AREA_INFO['3bhk_tower_simplex']['display_name']}: {AREA_INFO['3bhk_tower_simplex']['super_buildup']}")
+            results.append(f"{AREA_INFO['4bhk_tower_simplex']['display_name']}: {AREA_INFO['4bhk_tower_simplex']['super_buildup']}")
+    else:
+        # Regular units - only add specific matches
+        if "3bhk" in query_lower or "3 bhk" in query_lower:
+            results.append(f"{AREA_INFO['3bhk']['display_name']}: {AREA_INFO['3bhk']['super_buildup']}")
+        if "4bhk" in query_lower or "4 bhk" in query_lower:
+            results.append(f"{AREA_INFO['4bhk']['display_name']}: {AREA_INFO['4bhk']['super_buildup']}")
+        
+        # Only return all regular units if query is very general (like "what are the sizes" or "area information")
+        if not results and any(general_term in query_lower for general_term in ["what are", "all", "available", "sizes", "options"]) and not any(specific in query_lower for specific in ["5bhk", "penthouse", "villa", "studio"]):
+            results = [
+                f"{AREA_INFO['3bhk']['display_name']}: {AREA_INFO['3bhk']['super_buildup']}",
+                f"{AREA_INFO['4bhk']['display_name']}: {AREA_INFO['4bhk']['super_buildup']}"
+            ]
+    
+    return results
+
+# ================================================
 # CONVERSATION STATE & CONTEXT ANALYSIS WITH GEMINI
 # ================================================
 CONV_STATE = {}
@@ -261,8 +335,7 @@ def ensure_conversation_state(from_phone):
     if from_phone not in CONV_STATE:
         CONV_STATE[from_phone] = {
             "chat_history": [], 
-            "language": "english", 
-            "language_established": False,  # Track if user has established language preference
+            "language": "english",  # Default to English, will be dynamically detected
             "waiting_for": None,
             "last_context_topics": [],
             "user_interests": [],
@@ -290,8 +363,6 @@ def ensure_conversation_state(from_phone):
             CONV_STATE[from_phone]["conversation_summary"] = ""
         if "user_preferences" not in CONV_STATE[from_phone]:
             CONV_STATE[from_phone]["user_preferences"] = {}
-        if "language_established" not in CONV_STATE[from_phone]:
-            CONV_STATE[from_phone]["language_established"] = False
 
 def update_conversation_memory_with_gemini(state, user_message, bot_response):
     """Use Gemini to analyze and update conversation memory"""
@@ -378,20 +449,39 @@ def detect_location_request_with_gemini(message_text):
         if not gemini_model:
             return False
         
+        # First check if message contains property inquiry keywords - if yes, don't treat as location request
+        property_inquiry_keywords = [
+            "bhk", "flat", "apartment", "house", "home", "property", "unit", 
+            "bedroom", "price", "cost", "rate", "booking", "buy", "purchase",
+            "interested", "looking", "want", "need", "show", "see", "visit",
+            "ફ્લેટ", "ઘર", "પ્રોપર્ટી", "બેડરૂમ", "કિંમત", "દર", "ખરીદી", "જોઈએ", "શોધી"
+        ]
+        
+        message_lower = message_text.lower()
+        if any(keyword in message_lower for keyword in property_inquiry_keywords):
+            logging.info(f"🏠 Property inquiry detected, not treating as location request: '{message_text[:30]}...'")
+            return False
+        
         location_detection_prompt = f"""
-Analyze this message and determine if the user is asking for location, address, or directions to a property/site.
+Analyze this message and determine if the user is SPECIFICALLY asking for location, address, or directions to a property/site.
 
 User Message: "{message_text}"
 
-Consider these as location requests:
-- Asking for address, location, directions
-- "Where is it located?"
-- "Can you share the location?"
-- "What's the address?"
-- "How to reach there?"
-- Similar location-related queries in any language
+ONLY consider these as location requests:
+- Direct requests for address, location, directions, map
+- "Where is it located?" / "કયાં સ્થિત છે?"
+- "Can you share the location?" / "લોકેશન શેર કરો"
+- "What's the address?" / "સરનામું શું છે?"
+- "How to reach there?" / "ત્યાં કેવી રીતે પહોંચવું?"
+- "Send location" / "લોકેશન મોકલો"
 
-Respond with only "YES" if it's a location request, or "NO" if it's not.
+DO NOT consider these as location requests:
+- General property inquiries about flats/apartments
+- Questions about prices, features, amenities
+- Interest in visiting or seeing properties
+- Questions about availability or types of units
+
+Respond with only "YES" if it's a SPECIFIC location/address request, or "NO" if it's any other type of inquiry.
         """
         
         response = gemini_model.generate_content(location_detection_prompt)
@@ -543,40 +633,70 @@ def mark_message_as_read(message_id):
         logging.error(f"Error marking message as read: {e}")
 
 # ================================================
+# WORKVEU CRM INTEGRATION
+# ================================================
+def push_to_workveu(name, wa_id, message_text, direction="inbound"):
+    """Push chat messages to WorkVEU CRM for admin monitoring"""
+    if not WORKVEU_WEBHOOK_URL or not WORKVEU_API_KEY:
+        logging.warning("⚠️ WorkVEU integration skipped: Missing WORKVEU_WEBHOOK_URL or WORKVEU_API_KEY in .env file.")
+        return
+
+    payload = {
+        "api_key": WORKVEU_API_KEY,
+        "contacts": [
+            {
+                "profile": {"name": name or "Unknown User"},
+                "wa_id": wa_id,
+                "remarks": f"[{direction.upper()}] {message_text}"
+            }
+        ]
+    }
+
+    try:
+        headers = {"Content-Type": "application/json"}
+        response = requests.post(WORKVEU_WEBHOOK_URL, headers=headers, json=payload, timeout=10)
+        if response.status_code == 200:
+            logging.info(f"✅ WorkVEU message synced ({direction}) for {wa_id}")
+        else:
+            logging.error(f"❌ WorkVEU sync failed: {response.status_code} - {response.text}")
+    except Exception as e:
+        logging.error(f"❌ Error pushing to WorkVEU: {e}")
+
+# ================================================
 # MESSAGE PROCESSING
 # ================================================
 def process_incoming_message(from_phone, message_text, message_id):
     ensure_conversation_state(from_phone)
     state = CONV_STATE[from_phone]
     
-    # Improved language detection - consider conversation history
+    # Dynamic language detection - respond in the same language as current message
     current_msg_has_gujarati = any("\u0A80" <= c <= "\u0AFF" for c in message_text)
     
-    # If current message has Gujarati, definitely set to Gujarati
+    # Set language based on current message (dynamic response)
     if current_msg_has_gujarati:
         state["language"] = "gujarati"
-        state["language_established"] = True
-    # If user hasn't established language preference yet, detect from current message
-    elif not state.get("language_established", False):
-        state["language"] = "gujarati" if current_msg_has_gujarati else "english"
-        # Check conversation history to see if user has used Gujarati before
-        for msg in state["chat_history"][-5:]:  # Check last 5 messages
-            if any("\u0A80" <= c <= "\u0AFF" for c in msg.get("content", "")):
-                state["language"] = "gujarati"
-                break
-        state["language_established"] = True
-    # If language is established and user has been using Gujarati, keep using Gujarati
-    # unless they explicitly write a long English message (>20 words) indicating switch
-    elif state.get("language") == "gujarati":
-        # Keep Gujarati unless it's a very long English message suggesting intentional switch
-        english_words = len(message_text.split())
-        if not current_msg_has_gujarati and english_words > 20:
+    else:
+        # Check if it's mostly English text (not just numbers/symbols)
+        english_chars = sum(1 for c in message_text if c.isalpha() and ord(c) < 128)
+        total_chars = len([c for c in message_text if c.isalpha()])
+        
+        if total_chars > 0 and (english_chars / total_chars) > 0.7:
             state["language"] = "english"
-        # Otherwise keep Gujarati preference
+        else:
+            # If unclear, check recent conversation history for context
+            recent_gujarati = False
+            for msg in state["chat_history"][-3:]:  # Check last 3 messages
+                if any("\u0A80" <= c <= "\u0AFF" for c in msg.get("content", "")):
+                    recent_gujarati = True
+                    break
+            state["language"] = "gujarati" if recent_gujarati else "english"
     
-    logging.info(f"🌐 Language detected: {state['language']} (established: {state.get('language_established', False)}) for message: {message_text[:30]}...")
+    logging.info(f"🌐 Language detected: {state['language']} for message: {message_text[:30]}...")
     
     state["chat_history"].append({"role": "user", "content": message_text})
+
+    # >>> Added for WorkVEU CRM Integration <<<
+    push_to_workveu(name=None, wa_id=from_phone, message_text=message_text, direction="inbound")
 
     # Check if this is the first message and send welcome
     if state.get("is_first_message", True):
@@ -585,6 +705,9 @@ def process_incoming_message(from_phone, message_text, message_id):
         if state["language"] == "gujarati":
             welcome_text = translate_english_to_gujarati(welcome_text)
         send_whatsapp_text(from_phone, welcome_text)
+        
+        # >>> Added for WorkVEU CRM Integration <<<
+        push_to_workveu(name="Brookstone Bot", wa_id=from_phone, message_text=welcome_text, direction="outbound")
         return
 
     # 🗺️ PRIORITY: Check for location requests first (using Gemini AI detection)
@@ -606,6 +729,9 @@ def process_incoming_message(from_phone, message_text, message_id):
         if state["language"] == "gujarati":
             brochure_sent_text = translate_english_to_gujarati(brochure_sent_text)
         send_whatsapp_text(from_phone, brochure_sent_text)
+        
+        # >>> Added for WorkVEU CRM Integration <<<
+        push_to_workveu(name="Brookstone Bot", wa_id=from_phone, message_text=f"📄 Brochure sent + {brochure_sent_text}", direction="outbound")
         return
     
     # Check for English brochure requests
@@ -617,6 +743,9 @@ def process_incoming_message(from_phone, message_text, message_id):
             if state["language"] == "gujarati":
                 brochure_sent_text = translate_english_to_gujarati(brochure_sent_text)
             send_whatsapp_text(from_phone, brochure_sent_text)
+            
+            # >>> Added for WorkVEU CRM Integration <<<
+            push_to_workveu(name="Brookstone Bot", wa_id=from_phone, message_text=f"📄 Brochure sent + {brochure_sent_text}", direction="outbound")
             return
 
     # Analyze user interests for better follow-up questions (using Gemini)
@@ -637,14 +766,20 @@ def process_incoming_message(from_phone, message_text, message_id):
             if state["language"] == "gujarati":
                 brochure_text = translate_english_to_gujarati(brochure_text)
             send_whatsapp_text(from_phone, brochure_text)
+            
+            # >>> Added for WorkVEU CRM Integration <<<
+            push_to_workveu(name="Brookstone Bot", wa_id=from_phone, message_text=f"📄 Brochure sent + {brochure_text}", direction="outbound")
             return
         elif any(word in message_lower for word in ["no", "not now", "later", "નહીં", "ના"]):
             state["waiting_for"] = None
             state["last_follow_up"] = None  # Clear previous follow-up
-            later_text = "Sure! Let me know if you'd like the brochure later or have any other questions about Brookstone. 🏠�"
+            later_text = "Sure! Let me know if you'd like the brochure later or have any other questions about Brookstone. 🏠😊"
             if state["language"] == "gujarati":
                 later_text = translate_english_to_gujarati(later_text)
             send_whatsapp_text(from_phone, later_text)
+            
+            # >>> Added for WorkVEU CRM Integration <<<
+            push_to_workveu(name="Brookstone Bot", wa_id=from_phone, message_text=later_text, direction="outbound")
             return
     
     # Handle ambiguous responses (when user says "sure" but it's unclear what they want)
@@ -657,6 +792,9 @@ def process_incoming_message(from_phone, message_text, message_id):
             if state["language"] == "gujarati":
                 clarify_text = translate_english_to_gujarati(clarify_text)
             send_whatsapp_text(from_phone, clarify_text)
+            
+            # >>> Added for WorkVEU CRM Integration <<<
+            push_to_workveu(name="Brookstone Bot", wa_id=from_phone, message_text=clarify_text, direction="outbound")
             return
         # Check if user wants site visit
         elif any(word in message_lower for word in ["visit", "site", "see", "tour", "book", "appointment", "schedule", "મુલાકાત", "સાઇટ"]):
@@ -666,6 +804,9 @@ def process_incoming_message(from_phone, message_text, message_id):
             if state["language"] == "gujarati":
                 visit_text = translate_english_to_gujarati(visit_text)
             send_whatsapp_text(from_phone, visit_text)
+            
+            # >>> Added for WorkVEU CRM Integration <<<
+            push_to_workveu(name="Brookstone Bot", wa_id=from_phone, message_text=visit_text, direction="outbound")
             return
         else:
             # If still unclear, ask again
@@ -674,6 +815,9 @@ def process_incoming_message(from_phone, message_text, message_id):
             if state["language"] == "gujarati":
                 unclear_text = translate_english_to_gujarati(unclear_text)
             send_whatsapp_text(from_phone, unclear_text)
+            
+            # >>> Added for WorkVEU CRM Integration <<<
+            push_to_workveu(name="Brookstone Bot", wa_id=from_phone, message_text=unclear_text, direction="outbound")
             return
 
     if not retriever:
@@ -681,6 +825,9 @@ def process_incoming_message(from_phone, message_text, message_id):
         if state["language"] == "gujarati":
             error_text = translate_english_to_gujarati(error_text)
         send_whatsapp_text(from_phone, error_text)
+        
+        # >>> Added for WorkVEU CRM Integration <<<
+        push_to_workveu(name="Brookstone Bot", wa_id=from_phone, message_text=error_text, direction="outbound")
         return
 
     try:
@@ -690,8 +837,69 @@ def process_incoming_message(from_phone, message_text, message_id):
             search_query = translate_gujarati_to_english(message_text)
             logging.info(f"🔄 Translated query: {search_query}")
 
-        docs = retriever.invoke(search_query)
-        logging.info(f"📚 Retrieved {len(docs)} relevant documents")
+        # Area terminology mapping for search and response
+        area_response_mapping = {}
+        original_query = search_query
+        
+        # Check if user is asking about area-related queries
+        search_query_lower = search_query.lower()
+        
+        # Check if this is an area-related query that we have hardcoded information for
+        area_keywords = ["area", "sqft", "square feet", "size", "carpet", "super build", "buildup", "built-up", "sbu"]
+        is_area_query = any(keyword in search_query_lower for keyword in area_keywords)
+        
+        # Check for area terminology mapping first
+        area_response_mapping = {}
+        if any(term in search_query_lower for term in ["carpet area", "carpet"]):
+            area_response_mapping["user_term"] = "carpet area"
+            area_response_mapping["response_term"] = "Super Build-up area"
+            logging.info("🏠 User asked about carpet area - will respond with Super Build-up area")
+        elif any(term in search_query_lower for term in ["super build-up", "super buildup", "build-up", "buildup", "built-up", "sbu", "super build up", "build up"]):
+            # Extract the original term user used
+            original_term = "Super Build-up area"
+            if "sbu" in search_query_lower:
+                original_term = "SBU"
+            elif "build-up" in search_query_lower or "buildup" in search_query_lower or "built-up" in search_query_lower:
+                original_term = "Build-up area"
+            elif "super build" in search_query_lower:
+                original_term = "Super Build-up area"
+            
+            area_response_mapping["user_term"] = original_term.lower()
+            area_response_mapping["response_term"] = original_term
+            logging.info(f"🏠 User asked about {original_term}")
+        
+        # Try to get hardcoded information for area queries FIRST
+        hardcoded_area_info = []
+        use_hardcoded_only = False
+        
+        if is_area_query and area_response_mapping:
+            # For area-related queries, check hardcoded information first
+            hardcoded_area_info = get_area_information(search_query)
+            if hardcoded_area_info:
+                logging.info(f"🏠 Found hardcoded area information: {hardcoded_area_info}")
+                use_hardcoded_only = True
+                # Skip Pinecone search for area queries when hardcoded info is available
+                docs = []
+                context = ""
+            else:
+                logging.info(f"🏠 No hardcoded area info found, will search Pinecone")
+        
+        # If not using hardcoded info only, proceed with Pinecone search
+        if not use_hardcoded_only:
+            # Apply search term mapping for Pinecone search
+            if area_response_mapping:
+                if area_response_mapping["user_term"] == "carpet area":
+                    # Search for carpet area in Pinecone
+                    logging.info("🏠 Searching Pinecone for carpet area but will respond with Super Build-up area")
+                else:
+                    # Replace their term with "carpet area" for Pinecone search
+                    search_query = re.sub(r'\b(super build-?up|build-?up|built-?up|sbu)(\s+area)?\b', 'carpet area', search_query, flags=re.IGNORECASE)
+                    logging.info(f"🏠 Modified search query for Pinecone: {search_query}")
+            
+            docs = retriever.invoke(search_query)
+            logging.info(f"📚 Retrieved {len(docs)} relevant documents")
+        else:
+            docs = []
 
         context = "\n\n".join(
             [(d.page_content or "") + ("\n" + "\n".join(f"{k}: {v}" for k, v in (d.metadata or {}).items())) for d in docs]
@@ -729,6 +937,25 @@ def process_incoming_message(from_phone, message_text, message_id):
         if state.get("last_follow_up"):
             follow_up_memory = f"\nRECENT FOLLOW-UP: I recently asked '{state['last_follow_up']}' and user is now responding to that question."
         
+        # Area terminology instruction based on user query
+        area_terminology_instruction = ""
+        hardcoded_area_context = ""
+        
+        # Include hardcoded area information if available and this is an area query
+        if hardcoded_area_info and use_hardcoded_only:
+            hardcoded_area_context = f"\nHARDCODED AREA INFORMATION (USE THIS): {' | '.join(hardcoded_area_info)}"
+            area_terminology_instruction += f"\nIMPORTANT: Use ONLY the hardcoded area information provided above for area-related questions. This is the most accurate and up-to-date information. Do NOT search or use any other sources for area information."
+        elif hardcoded_area_info and not use_hardcoded_only:
+            # Hardcoded info available but also using Pinecone context
+            hardcoded_area_context = f"\nHARDCODED AREA INFORMATION: {' | '.join(hardcoded_area_info)}"
+            area_terminology_instruction += f"\nIMPORTANT: Prefer the hardcoded area information when available, but you can also use context information if needed."
+        
+        if area_response_mapping:
+            if area_response_mapping["user_term"] == "carpet area":
+                area_terminology_instruction += f"\nIMPORTANT AREA TERMINOLOGY: User asked about '{area_response_mapping['user_term']}' but you must respond using '{area_response_mapping['response_term']}' instead. Say something like 'The {area_response_mapping['response_term']} is...' or 'Our {area_response_mapping['response_term']} for...' - NEVER mention 'carpet area' in your response."
+            else:
+                area_terminology_instruction += f"\nIMPORTANT AREA TERMINOLOGY: User asked about '{area_response_mapping['response_term']}'. Use their exact term '{area_response_mapping['response_term']}' in your response - do NOT mention 'carpet area'."
+        
         # Determine language for system prompt
         language_instruction = ""
         if state["language"] == "gujarati":
@@ -739,13 +966,17 @@ You are a friendly real estate assistant for Brookstone project. Be conversation
 
 {language_instruction}
 
+{area_terminology_instruction}
+
+{hardcoded_area_context}
+
 CORE INSTRUCTIONS:
-- Be VERY CONCISE - give brief, direct answers (2-3 sentences max)
+- Be EXTREMELY CONCISE - Maximum 1-2 sentences for initial response
 - Answer using context below when available
-- Use 2-3 relevant emojis to make responses engaging
-- Keep responses WhatsApp-friendly
+- Use 2-3 relevant emojis only
+- Keep responses WhatsApp-friendly and brief
 - Do NOT invent details
-- Remember conversation flow and previous follow-ups
+- Do NOT give long explanations unless specifically asked
 - ALWAYS try to convince user in a friendly way
 - Use the conversation memory and user preferences provided
 - Be NATURAL and CONTEXTUAL - don't repeat the same phrases in every response
@@ -759,16 +990,21 @@ SMART FLAT MENTIONS:
   * "What do you have?" / "What's available?"
   * Property types or unit options
   * First-time inquiries about the project
-- Whether user asks about 3BHK or whether user asks about 4BHK, mention both types "We have luxurious 3&4BHK flats available to Brookstone!"
+- Whether user asks about 3BHK or whether user asks about 4BHK, mention both types "We have luxurious 3&4BHK flats available at Brookstone!"
 - Do NOT force this phrase into every response - be natural and contextual
 - For queries about amenities, location, pricing, etc. - just answer directly without mentioning flat types
 
+RESPONSE LENGTH RULES:
+- For flat availability questions: "Yes! We have luxury 3&4BHK flats available 🏠 Interested in details? ✨"
+- For general questions: Keep to 1 short sentence + 1 follow-up question
+- NO detailed explanations unless specifically asked for details
+- NO long paragraphs or multiple sentences
+
 BROCHURE STRATEGY:
-- ACTIVELY offer brochure when user shows interest in details, layout, floor plans, specifications, amenities
+- offer brochure as a follow-up when user shows interest in details, layout, floor plans, specifications, amenities after answering from retrieved context
 - Use phrases like "Would you like me to send you our detailed brochure?" 
 - The brochure contains complete information about Brookstone's luxury offerings
 - Make brochure sound valuable and comprehensive
-- Offer brochure for queries about layouts, floor plans, unit details, specifications
 
 SPECIAL HANDLING:
 
@@ -780,7 +1016,7 @@ SPECIAL HANDLING:
 
 4. PRICING: Check context first. If no pricing info: "For latest pricing details, please contact our agents at 8238477697 or 9974812701. 💰📞"
 
-5. BROCHURE OFFERING: When user asks about details/layout/plans/amenities/specifications: "Would you like me to send you our detailed brochure with all floor plans and specifications? 📄✨"
+
 
 IMPORTANT: Do NOT handle location/address requests here - they are processed separately and will send location pin automatically.
 
@@ -810,12 +1046,12 @@ CONVERSATION FLOW:
 - Always sound excited about Brookstone!
 
 Example Responses (be contextual, not repetitive):
-- When user asks about flat types: "Yes! Brookstone offers luxurious 3&4BHK flats 🏠✨ Which one interests you more? 🌟"
-- When user asks about amenities: "We have amazing amenities including [specific amenities] 💎 Would you like to know more details? 📐"
-- When user asks about location: "Great location with excellent connectivity! 🗺️ Any other questions about the project? ✨"
-- When user asks about pricing: "Let me connect you with our pricing team � Meanwhile, interested in seeing our floor plans? 📄"
+- When user asks about flat types: "Yes! We have luxury 3&4BHK flats 🏠 Which interests you more? ✨"
+- When user asks about amenities: "Amazing amenities available! 💎 Want the brochure? �"
+- When user asks about location: "Great location with excellent connectivity! 🗺️ Want to visit? 📞"
+- When user asks about pricing: "Please contact 8238477697 for pricing 📞 Interested in floor plans? 📄"
 
-Remember: Only mention 3&4BHK when it's actually relevant to the user's question!
+Remember: Keep responses EXTREMELY brief - maximum 1-2 sentences!
 
 ---
 Available Knowledge Context:
@@ -825,7 +1061,7 @@ User Question: {search_query}
 
 IMPORTANT: Be natural and contextual. Don't force "Brookstone offers luxurious 3&4BHK flats" into every response. Only mention flat types when the user specifically asks about configurations, availability, or what types of units you have.
 
-Provide a brief, convincing answer with good emojis and ask ONE relevant follow-up question.
+KEEP RESPONSES VERY SHORT - Maximum 1-2 sentences + 1 simple follow-up question.
 Assistant:
         """.strip()
 
@@ -835,10 +1071,26 @@ Assistant:
             if state["language"] == "gujarati":
                 error_text = translate_english_to_gujarati(error_text)
             send_whatsapp_text(from_phone, error_text)
+            
+            # >>> Added for WorkVEU CRM Integration <<<
+            push_to_workveu(name="Brookstone Bot", wa_id=from_phone, message_text=error_text, direction="outbound")
             return
 
         response = gemini_chat.invoke(system_prompt).content.strip()
         logging.info(f"🧠 LLM Response: {response}")
+
+        # Apply area terminology replacement in the response if needed
+        if area_response_mapping:
+            if area_response_mapping["user_term"] == "carpet area":
+                # User asked about carpet area, replace any mention of "carpet area" with "Super Build-up area"
+                response = re.sub(r'\bcarpet\s+area\b', area_response_mapping["response_term"], response, flags=re.IGNORECASE)
+                response = re.sub(r'\bcarpet\b(?!\s+area)', area_response_mapping["response_term"], response, flags=re.IGNORECASE)
+                logging.info(f"🏠 Replaced carpet area mentions with {area_response_mapping['response_term']}")
+            else:
+                # User asked about super build-up/build-up/SBU, make sure we don't mention carpet area
+                response = re.sub(r'\bcarpet\s+area\b', area_response_mapping["response_term"], response, flags=re.IGNORECASE)
+                response = re.sub(r'\bcarpet\b(?!\s+area)', area_response_mapping["response_term"], response, flags=re.IGNORECASE)
+                logging.info(f"🏠 Ensured response uses {area_response_mapping['response_term']} instead of carpet area")
 
         # Translate response to Gujarati if user language is Gujarati
         final_response = response
@@ -848,6 +1100,9 @@ Assistant:
 
         # --- Send primary text response ---
         send_whatsapp_text(from_phone, final_response)
+
+        # >>> Added for WorkVEU CRM Integration <<<
+        push_to_workveu(name="Brookstone Bot", wa_id=from_phone, message_text=final_response, direction="outbound")
 
         # Store the follow-up question asked by the bot for memory
         # Extract follow-up question from response (look for question marks)
@@ -903,6 +1158,9 @@ Assistant:
         if state["language"] == "gujarati":
             error_text = translate_english_to_gujarati(error_text)
         send_whatsapp_text(from_phone, error_text)
+        
+        # >>> Added for WorkVEU CRM Integration <<<
+        push_to_workveu(name="Brookstone Bot", wa_id=from_phone, message_text=error_text, direction="outbound")
 
 # ================================================
 # WEBHOOK ROUTES
@@ -965,6 +1223,7 @@ def health():
         "whatsapp_configured": bool(WHATSAPP_TOKEN and WHATSAPP_PHONE_NUMBER_ID),
         "gemini_configured": bool(GEMINI_API_KEY and gemini_model and gemini_chat),
         "pinecone_configured": bool(PINECONE_API_KEY and openai_embeddings),
+        "workveu_configured": bool(WORKVEU_WEBHOOK_URL and WORKVEU_API_KEY),
         "hybrid_mode": "Gemini for chat, OpenAI for search"
     }), 200
 
