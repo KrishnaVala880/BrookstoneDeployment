@@ -6,7 +6,6 @@ import requests
 from dotenv import load_dotenv
 from langchain_pinecone import PineconeVectorStore
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
-from langchain_community.embeddings import OpenAIEmbeddings
 import json
 from datetime import datetime, timedelta
 import google.generativeai as genai
@@ -23,7 +22,6 @@ WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
 WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN", "brookstone_verify_token_2024")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # Keep for Pinecone embeddings
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 BROCHURE_URL = os.getenv("BROCHURE_URL", "https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/BROOKSTONE.pdf")
 
@@ -131,8 +129,8 @@ try:
 except Exception as e:
     logging.error(f"❌ Error initializing media: {e}")
 
-if not GEMINI_API_KEY or not PINECONE_API_KEY or not OPENAI_API_KEY:
-    logging.error("❌ Missing API keys! Need GEMINI_API_KEY, PINECONE_API_KEY, and OPENAI_API_KEY")
+if not GEMINI_API_KEY or not PINECONE_API_KEY:
+    logging.error("❌ Missing API keys! Need GEMINI_API_KEY and PINECONE_API_KEY")
 
 # Initialize Gemini for chat, translations, and Pinecone embeddings
 gemini_model = None
@@ -167,31 +165,14 @@ else:
         gemini_chat = None
         gemini_embeddings = None
 
-# Keep OpenAI as fallback if needed
-openai_embeddings = None
-if OPENAI_API_KEY:
-    try:
-        openai_embeddings = OpenAIEmbeddings(
-            model="text-embedding-3-large",
-            openai_api_key=OPENAI_API_KEY
-        )
-        logging.info("✅ OpenAI embeddings available as fallback")
-    except Exception as e:
-        logging.error(f"❌ Error initializing OpenAI embeddings: {e}")
-        openai_embeddings = None
-
 # ================================================
 # PINECONE SETUP
 # ================================================
-INDEX_NAME = "brookstone-index"
+INDEX_NAME = "brookstone-faq"
 
 def load_vectorstore():
     if not gemini_embeddings:
         logging.error("❌ Gemini embeddings not available for Pinecone")
-        # Try fallback to OpenAI if available
-        if openai_embeddings:
-            logging.warning("⚠️ Using OpenAI embeddings as fallback - may have dimension mismatch")
-            return PineconeVectorStore(index_name=INDEX_NAME, embedding=openai_embeddings)
         return None
     return PineconeVectorStore(index_name=INDEX_NAME, embedding=gemini_embeddings)
 
@@ -1073,7 +1054,6 @@ def health():
         "gemini_configured": bool(GEMINI_API_KEY and gemini_model and gemini_chat),
         "gemini_embeddings_configured": bool(gemini_embeddings),
         "pinecone_configured": bool(PINECONE_API_KEY and gemini_embeddings),
-        "openai_fallback_available": bool(openai_embeddings),
         "workveu_configured": bool(WORKVEU_WEBHOOK_URL and WORKVEU_API_KEY),
         "mode": "Full Gemini integration with Gemini embeddings for Pinecone"
     }), 200
