@@ -162,7 +162,7 @@ else:
 # ================================================
 # OLLAMA + PINECONE RETRIEVAL SETUP (REPLACES OpenAI embeddings)
 # ================================================
-INDEX_NAME = "brookstone-faq"
+INDEX_NAME = "brookstone-faq-ollama"
 
 try:
     ollama_embeddings = OllamaEmbeddings(model="nomic-embed-text")
@@ -790,37 +790,7 @@ def process_incoming_message(from_phone, message_text, message_id):
         send_whatsapp_location(from_phone)
         return
 
-    # 📄 PRIORITY: Check for direct brochure requests (Enhanced Gujarati Support)
-    brochure_keywords = ["brochure", "pdf", "document", "file", "download", "send", "details", "ब्रोशर", "બ્રોશર"]
-    gujarati_action_words = ["મોકલો", "આપો", "મોકલાવો", "મોકલ", "આપ", "જોઈએ", "પાઠવો", "મેળવવા", "લેવા"]
-    
-    # Check for Gujarati brochure requests specifically
-    if "બ્રોશર" in message_text:
-        # If user mentions "બ્રોશર" in any context, send the brochure immediately
-        logging.info(f"📄 Gujarati brochure request detected from {from_phone} - 'બ્રોશર' found")
-        send_whatsapp_document(from_phone)
-        brochure_sent_text = "📄 Here's your Brookstone brochure with complete details! ✨ Any questions after reviewing it? 🏠😊"
-        if state["language"] == "gujarati":
-            brochure_sent_text = translate_english_to_gujarati(brochure_sent_text)
-        send_whatsapp_text(from_phone, brochure_sent_text)
-        
-        # >>> Added for WorkVEU CRM Integration <<<
-        push_to_workveu(name="Brookstone Bot", wa_id=from_phone, message_text=f"📄 Brochure sent + {brochure_sent_text}", direction="outbound")
-        return
-    
-    # Check for English brochure requests
-    if any(keyword in message_text.lower() for keyword in brochure_keywords):
-        if any(word in message_text.lower() for word in ["send", "share", "give", "want", "need", "show"] + gujarati_action_words):
-            logging.info(f"📄 Direct brochure request detected from {from_phone}")
-            send_whatsapp_document(from_phone)
-            brochure_sent_text = "📄 Here's your Brookstone brochure with complete details! ✨ Any questions after reviewing it? 🏠😊"
-            if state["language"] == "gujarati":
-                brochure_sent_text = translate_english_to_gujarati(brochure_sent_text)
-            send_whatsapp_text(from_phone, brochure_sent_text)
-            
-            # >>> Added for WorkVEU CRM Integration <<<
-            push_to_workveu(name="Brookstone Bot", wa_id=from_phone, message_text=f"📄 Brochure sent + {brochure_sent_text}", direction="outbound")
-            return
+    # Let AI model handle all intent detection intelligently instead of keyword matching
 
     # Analyze user interests for better follow-up questions (using Gemini)
     current_interests = analyze_user_interests_with_gemini(message_text, state)
@@ -991,10 +961,12 @@ RESPONSE LENGTH RULES:
 - NO long paragraphs or multiple sentences
 
 BROCHURE STRATEGY:
-- offer brochure as a follow-up when user shows interest in details, layout, floor plans, specifications, amenities after answering the question from context
-- Use phrases like "Would you like me to send you our detailed brochure?" 
-- The brochure contains complete information about Brookstone's luxury offerings
-- Make brochure sound valuable and comprehensive
+- INTELLIGENTLY detect when user wants brochure/documents/detailed information without relying on keywords
+- Look for intent patterns like: wanting details, floor plans, specifications, complete information, downloadable content
+- if user asks about : "I want 4bhk details", "tell me about your flats", "I need more information", "show me plans" , then offer brochure as a follow-up after providing answer from context.
+- In Gujarati: "વિગતો જોઈએ", "માહિતી મોકલો", "ડીટેલ્સ આપો" etc. , then offer brochure as a follow-up after providing answer from context.
+- When you detect brochure intent, say: "I'll send you our detailed brochure with complete information!"
+- Make brochure sound valuable: "complete floor plans", "all specifications", "detailed layouts"
 
 SPECIAL HANDLING:
 
@@ -1117,10 +1089,10 @@ Assistant:
             # Bot already provided agent contact info, no state change needed
             logging.info(f"📞 Agent contact info provided to {from_phone}")
 
-        # Legacy intent detection for immediate actions (without confirmation) 
+        # AI-driven intent detection for immediate actions
         # Note: Location requests are now handled separately by Gemini detection
-        if re.search(r"\bhere.*brochure\b|\bsending.*brochure\b", response_lower) and state.get("waiting_for") != "brochure_confirmation":
-            logging.info(f"📄 Legacy brochure trigger for {from_phone}")
+        if re.search(r"\bi'll send you.*brochure\b|\bsending.*brochure\b|\bhere.*brochure.*complete\b", response_lower) and state.get("waiting_for") != "brochure_confirmation":
+            logging.info(f"📄 AI detected brochure intent for {from_phone}")
             send_whatsapp_document(from_phone)
 
         state["chat_history"].append({"role": "assistant", "content": final_response})

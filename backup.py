@@ -716,37 +716,7 @@ def process_incoming_message(from_phone, message_text, message_id):
         send_whatsapp_location(from_phone)
         return
 
-    # 📄 PRIORITY: Check for direct brochure requests (Enhanced Gujarati Support)
-    brochure_keywords = ["brochure", "pdf", "document", "file", "download", "send", "details", "ब्रोशर", "બ્રોશર"]
-    gujarati_action_words = ["મોકલો", "આપો", "મોકલાવો", "મોકલ", "આપ", "જોઈએ", "પાઠવો", "મેળવવા", "લેવા"]
-    
-    # Check for Gujarati brochure requests specifically
-    if "બ્રોશર" in message_text:
-        # If user mentions "બ્રોશર" in any context, send the brochure immediately
-        logging.info(f"📄 Gujarati brochure request detected from {from_phone} - 'બ્રોશર' found")
-        send_whatsapp_document(from_phone)
-        brochure_sent_text = "📄 Here's your Brookstone brochure with complete details! ✨ Any questions after reviewing it? 🏠😊"
-        if state["language"] == "gujarati":
-            brochure_sent_text = translate_english_to_gujarati(brochure_sent_text)
-        send_whatsapp_text(from_phone, brochure_sent_text)
-        
-        # >>> Added for WorkVEU CRM Integration <<<
-        push_to_workveu(name="Brookstone Bot", wa_id=from_phone, message_text=f"📄 Brochure sent + {brochure_sent_text}", direction="outbound")
-        return
-    
-    # Check for English brochure requests
-    if any(keyword in message_text.lower() for keyword in brochure_keywords):
-        if any(word in message_text.lower() for word in ["send", "share", "give", "want", "need", "show"] + gujarati_action_words):
-            logging.info(f"📄 Direct brochure request detected from {from_phone}")
-            send_whatsapp_document(from_phone)
-            brochure_sent_text = "📄 Here's your Brookstone brochure with complete details! ✨ Any questions after reviewing it? 🏠😊"
-            if state["language"] == "gujarati":
-                brochure_sent_text = translate_english_to_gujarati(brochure_sent_text)
-            send_whatsapp_text(from_phone, brochure_sent_text)
-            
-            # >>> Added for WorkVEU CRM Integration <<<
-            push_to_workveu(name="Brookstone Bot", wa_id=from_phone, message_text=f"📄 Brochure sent + {brochure_sent_text}", direction="outbound")
-            return
+    # Let AI model handle all intent detection intelligently instead of keyword matching
 
     # Analyze user interests for better follow-up questions (using Gemini)
     current_interests = analyze_user_interests_with_gemini(message_text, state)
@@ -982,6 +952,11 @@ CORE INSTRUCTIONS:
 - Be NATURAL and CONTEXTUAL - don't repeat the same phrases in every response
 - Only mention flat types (3&4BHK) when user specifically asks about them
 
+CRITICAL AREA TERMINOLOGY RULE:
+- NEVER use the term "carpet area" in any response
+- ALWAYS use "Super Build-up area" or "SBU" when referring to area measurements
+- When talking about flat sizes, always say "Super Build-up area" not "carpet area"
+
 MEMORY CONTEXT: {follow_up_memory}{conversation_context}{preferences_context}
 
 SMART FLAT MENTIONS:
@@ -1079,18 +1054,25 @@ Assistant:
         response = gemini_chat.invoke(system_prompt).content.strip()
         logging.info(f"🧠 LLM Response: {response}")
 
-        # Apply area terminology replacement in the response if needed
+        # GLOBAL RULE: Always replace "carpet area" with "Super Build-up area" in ALL responses
+        # This ensures "carpet area" never appears in any bot response
+        original_response = response
+        response = re.sub(r'\bcarpet\s+area\b', 'Super Build-up area', response, flags=re.IGNORECASE)
+        response = re.sub(r'\bcarpet\b(?!\s+area)', 'Super Build-up area', response, flags=re.IGNORECASE)
+        
+        if original_response != response:
+            logging.info(f"🏠 GLOBAL: Replaced all 'carpet area' mentions with 'Super Build-up area'")
+
+        # Apply specific area terminology replacement if needed
         if area_response_mapping:
             if area_response_mapping["user_term"] == "carpet area":
-                # User asked about carpet area, replace any mention of "carpet area" with "Super Build-up area"
-                response = re.sub(r'\bcarpet\s+area\b', area_response_mapping["response_term"], response, flags=re.IGNORECASE)
-                response = re.sub(r'\bcarpet\b(?!\s+area)', area_response_mapping["response_term"], response, flags=re.IGNORECASE)
-                logging.info(f"🏠 Replaced carpet area mentions with {area_response_mapping['response_term']}")
+                # User asked about carpet area, use their mapped response term
+                response = re.sub(r'\bSuper Build-up area\b', area_response_mapping["response_term"], response, flags=re.IGNORECASE)
+                logging.info(f"🏠 Applied specific terminology: {area_response_mapping['response_term']}")
             else:
-                # User asked about super build-up/build-up/SBU, make sure we don't mention carpet area
-                response = re.sub(r'\bcarpet\s+area\b', area_response_mapping["response_term"], response, flags=re.IGNORECASE)
-                response = re.sub(r'\bcarpet\b(?!\s+area)', area_response_mapping["response_term"], response, flags=re.IGNORECASE)
-                logging.info(f"🏠 Ensured response uses {area_response_mapping['response_term']} instead of carpet area")
+                # User asked about super build-up/build-up/SBU, use their exact term
+                response = re.sub(r'\bSuper Build-up area\b', area_response_mapping["response_term"], response, flags=re.IGNORECASE)
+                logging.info(f"🏠 Applied specific terminology: {area_response_mapping['response_term']}")
 
         # Translate response to Gujarati if user language is Gujarati
         final_response = response
