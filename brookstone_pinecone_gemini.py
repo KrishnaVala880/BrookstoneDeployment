@@ -181,28 +181,42 @@ except Exception as e:
     pc = None
 
 # Helper wrapper so existing code calling retriever.invoke(query) still works
+# Replace the existing RetrieverWrapper class with this fixed version
+
 class RetrieverWrapper:
     def __init__(self, inner):
         self.inner = inner
 
     def invoke(self, query):
-        # Try common methods in order
-        try:
-            # some retrievers (custom) may implement invoke directly
-            return self.inner.invoke(query)
-        except Exception:
-            pass
-        try:
-            # LangChain retriever: get_relevant_documents
-            return self.inner.get_relevant_documents(query)
-        except Exception:
-            pass
-        try:
-            # Alternative: retrieve
-            return self.inner.retrieve(query)
-        except Exception as e:
-            logging.error(f"❌ Retriever invocation failed: {e}")
-            return []
+        """
+        Unified invoke method that works with different retriever types.
+        Tries methods in order of most to least common.
+        """
+        # Method 1: Try invoke() - LangChain's newer standard
+        if hasattr(self.inner, 'invoke') and callable(getattr(self.inner, 'invoke')):
+            try:
+                return self.inner.invoke(query)
+            except Exception as e:
+                logging.debug(f"invoke() method failed: {e}")
+        
+        # Method 2: Try get_relevant_documents() - LangChain's classic retriever method
+        if hasattr(self.inner, 'get_relevant_documents') and callable(getattr(self.inner, 'get_relevant_documents')):
+            try:
+                return self.inner.get_relevant_documents(query)
+            except Exception as e:
+                logging.debug(f"get_relevant_documents() method failed: {e}")
+        
+        # Method 3: Try similarity_search() - Direct vectorstore method
+        if hasattr(self.inner, 'similarity_search') and callable(getattr(self.inner, 'similarity_search')):
+            try:
+                return self.inner.similarity_search(query, k=5)
+            except Exception as e:
+                logging.debug(f"similarity_search() method failed: {e}")
+        
+        # If all methods fail, log error and return empty list
+        logging.error(f"❌ Retriever invocation failed: No compatible method found on {type(self.inner).__name__}")
+        logging.error(f"Available methods: {[m for m in dir(self.inner) if not m.startswith('_')]}")
+        return []
 
 def load_vectorstore():
     """
