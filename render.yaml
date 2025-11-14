@@ -1,0 +1,34 @@
+services:
+  - type: web
+    name: brookstone-whatsapp-bot
+    runtime: python
+    region: oregon
+    branch: main
+
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn brookstone_pinecone_gnuicorn:app
+
+    healthCheckPath: /health
+    autoDeploy: true
+
+    envVars:
+      - key: WHATSAPP_TOKEN
+        sync: false
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: VERIFY_TOKEN
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: PINECONE_API_KEY
+        sync: false
+      - key: BROCHURE_URL
+        sync: false
+      - key: WORKVEU_WEBHOOK_URL
+        sync: false
+      - key: WORKVEU_API_KEY
+        sync: false
+      - key: PORT
+        value: 10000
