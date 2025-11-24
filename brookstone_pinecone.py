@@ -6,7 +6,10 @@ import requests
 from dotenv import load_dotenv
 from pinecone import Pinecone
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
-from langchain_openai import OpenAIEmbeddings
+from langchain_community.embeddings.openai import OpenAIEmbeddings
+
+
+
 from langchain_community.vectorstores import Pinecone as LangchainPinecone
 import json
 from datetime import datetime, timedelta
