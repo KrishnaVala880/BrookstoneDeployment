@@ -4,9 +4,10 @@ import logging
 from flask import Flask, request, jsonify
 import requests
 from dotenv import load_dotenv
-from langchain_pinecone import PineconeVectorStore
+from pinecone import Pinecone
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_community.embeddings import OpenAIEmbeddings
+from langchain.vectorstores import Pinecone as LangchainPinecone
 import json
 from datetime import datetime, timedelta
 import google.generativeai as genai
@@ -183,7 +184,17 @@ def load_vectorstore():
     if not openai_embeddings:
         logging.error("❌ OpenAI embeddings not available for Pinecone")
         return None
-    return PineconeVectorStore(index_name=INDEX_NAME, embedding=openai_embeddings)
+    try:
+        # Initialize Pinecone
+        pc = Pinecone(api_key=PINECONE_API_KEY)
+        index = pc.Index(INDEX_NAME)
+        
+        # Create LangChain Pinecone vectorstore
+        vectorstore = LangchainPinecone(index, openai_embeddings.embed_query, "text")
+        return vectorstore
+    except Exception as e:
+        logging.error(f"❌ Error creating Pinecone vectorstore: {e}")
+        return None
 
 try:
     vectorstore = load_vectorstore()
