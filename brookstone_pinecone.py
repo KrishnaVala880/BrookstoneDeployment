@@ -6,8 +6,8 @@ import requests
 from dotenv import load_dotenv
 from pinecone import Pinecone
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
-from langchain_community.embeddings import OpenAIEmbeddings
-from langchain.vectorstores import Pinecone as LangchainPinecone
+from langchain_openai import OpenAIEmbeddings
+from langchain_community.vectorstores import Pinecone as LangchainPinecone
 import json
 from datetime import datetime, timedelta
 import google.generativeai as genai
@@ -164,11 +164,12 @@ else:
 # Initialize OpenAI embeddings for Pinecone (to work with existing data)
 if not OPENAI_API_KEY:
     logging.error("❌ Missing OpenAI API key! Pinecone search will not work.")
+    openai_embeddings = None
 else:
     try:
         openai_embeddings = OpenAIEmbeddings(
             model="text-embedding-3-large",
-            openai_api_key=OPENAI_API_KEY
+            api_key=OPENAI_API_KEY
         )
         logging.info("✅ OpenAI embeddings configured for Pinecone search")
     except Exception as e:
