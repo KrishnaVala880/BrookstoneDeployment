@@ -1,17 +1,29 @@
-langchain-google-genai
-google-generativeai
-flask>=2.3.0 
-requests>=2.31.0
-python-dotenv>=1.0.0
-langchain-pinecone>=0.1.0
-langchain-google-genai>=1.0.0
-google-generativeai>=0.8.0
-langchain-openai>=0.1.0
-openai>=1.0.0
-langchain-core>=0.2.0
-langchain-community>=0.2.0
-gunicorn>=21.2.0
-pytest>=7.4.0
-black>=23.0.0
-pinecone-client==3.0.0
+# Core Flask and web dependencies
+flask==2.3.3
+requests==2.31.0
+python-dotenv==1.0.0
+gunicorn==21.2.0
+
+# LangChain core and compatible versions
+langchain-core==0.2.38
+langchain-community==0.2.16
+langchain-openai==0.1.25
+langchain-google-genai==1.0.10
+langchain-pinecone==0.1.3
+
+# AI/ML APIs - compatible versions
+openai==1.45.0
+google-generativeai==0.7.2
+
+# Pinecone - compatible with langchain-pinecone
+pinecone-client==2.2.4
+
+# Additional dependencies
+numpy==1.24.4
+pydantic==2.5.3
+typing-extensions==4.9.0
+
+# Development tools (optional)
+pytest==7.4.4
+black==23.12.1
 
