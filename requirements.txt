@@ -1,28 +1,19 @@
-# Core Flask and web dependencies
-flask>=2.3.0,<3.0.0
-requests>=2.31.0
-python-dotenv>=1.0.0
-gunicorn>=21.0.0
+# Web framework
+flask==2.3.3
+requests==2.31.0
+python-dotenv==1.0.0
 
-# LangChain core packages - use latest compatible versions
-langchain-core>=0.1.0,<0.3.0
-langchain-community>=0.0.1,<0.3.0
-langchain-openai>=0.0.1,<0.2.0
-langchain-google-genai>=0.0.1,<2.0.0
-langchain-pinecone>=0.0.1,<1.0.0
+# LangChain packages
+langchain-core==0.2.38
+langchain-community==0.2.16
+langchain-openai==0.1.23
+langchain-google-genai==1.0.8
+langchain-pinecone==0.1.0
 
-# AI/ML APIs - flexible versions
-openai>=1.0.0,<2.0.0
-google-generativeai>=0.3.0,<1.0.0
+# AI APIs
+openai==1.37.0
+google-generativeai==0.7.2
 
-# Pinecone client
-pinecone-client>=3.0.0,<5.0.0
-
-# Core dependencies
-numpy>=1.21.0,<2.0.0
-pydantic>=1.10.0,<3.0.0
-
-# Development tools (optional)
-pytest==7.4.4
-black==23.12.1
+# Vector database
+pinecone-client==3.2.2
 
