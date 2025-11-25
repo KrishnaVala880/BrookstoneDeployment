@@ -1,17 +1,26 @@
-Flask==3.0.3
+# openai==1.56.0
+# langchain==0.3.7
+# langchain-core==0.3.21
+# langchain-openai==0.2.6
+# langchain-community==0.3.2
+# pinecone-client==5.0.1
+# google-generativeai==0.7.2
+# tiktoken==0.7.0
+# flask==3.0.3
+# requests==2.31.0
+# python-dotenv==1.0.1
+
+openai==1.56.0
+langchain==0.3.7
+langchain-core==0.3.21
+langchain-openai==0.2.6
+langchain-community==0.3.2
+langchain-google-genai
+
+pinecone-client==5.0.1
+google-generativeai==0.7.2
+tiktoken==0.7.0
+flask==3.0.3
 requests==2.31.0
 python-dotenv==1.0.1
-pinecone-client==3.2.2
 
-langchain==0.2.13
-langchain-community==0.2.12
-langchain-core==0.2.43
-langchain-pinecone==0.1.3
-langchain-google-genai==1.0.5
-
-google-generativeai==0.5.2
-
-openai==1.40.2
-tiktoken==0.7.0
-
-gunicorn==21.2.0
