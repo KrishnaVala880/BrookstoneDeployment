@@ -4,11 +4,12 @@ import logging
 from flask import Flask, request, jsonify
 import requests
 from dotenv import load_dotenv
-from langchain_pinecone import PineconeVectorStore
+from pinecone import Pinecone
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
-from langchain_community.embeddings import OpenAIEmbeddings
+# from langchain_openai import OpenAIEmbeddings
+from langchain_community.vectorstores import Pinecone as LangchainPinecone
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import google.generativeai as genai
 
 load_dotenv()
@@ -59,13 +60,39 @@ def save_media_state(state: dict):
 def _find_brochure_file():
     # common locations
     candidates = [
-        os.path.join(os.path.dirname(__file__), "static", "brochure", "BROOKSTONE.pdf"),
+        os.path.join(os.path.dirname(__file__), "static", "brochure", "GOLDIE_REAL_ESTATE.pdf"),
+        os.path.join(os.path.dirname(__file__), "static", "brochure", "GOLDIE_REAL_ESTATE .pdf"),
         os.path.join(os.path.dirname(__file__), "static", "BROCHURE.pdf"),
-        os.path.join(os.path.dirname(__file__), "BROOKSTONE.pdf"),
+        os.path.join(os.path.dirname(__file__), "static", "GOLDIE_REAL_ESTATE .pdf"),
+        os.path.join(os.path.dirname(__file__), "GOLDIE_REAL_ESTATE.pdf"),
+        os.path.join(os.path.dirname(__file__), "GOLDIE_REAL_ESTATE .pdf"),
+        os.path.join(os.path.dirname(__file__), "brochure.pdf"),
+        os.path.join(os.path.dirname(__file__), "GoldieRealEstate.pdf"),
+        "GOLDIE_REAL_ESTATE.pdf",
+        "GOLDIE_REAL_ESTATE .pdf",
+        "brochure.pdf",
+        "GoldieRealEstate.pdf"
     ]
     for c in candidates:
         if os.path.exists(c):
+            logging.info(f"✅ Found brochure file at: {c}")
             return c
+    
+    # Search for any PDF file in current directory as fallback
+    current_dir = os.path.dirname(__file__)
+    try:
+        files = os.listdir(current_dir)
+        pdf_files = [f for f in files if f.lower().endswith('.pdf')]
+        if pdf_files:
+            # Use the first PDF file found
+            fallback_file = os.path.join(current_dir, pdf_files[0])
+            logging.info(f"✅ Using fallback PDF file: {fallback_file}")
+            return fallback_file
+        logging.info(f"📁 Current directory: {current_dir}")
+        logging.info(f"📄 No PDF files found in directory")
+    except Exception as e:
+        logging.error(f"❌ Error listing directory: {e}")
+    
     return None
 
 
@@ -89,7 +116,7 @@ def upload_brochure_media():
             new_media_id = j.get("id")
             if new_media_id:
                 MEDIA_ID = new_media_id
-                state = {"media_id": MEDIA_ID, "uploaded_at": datetime.utcnow().isoformat()}
+                state = {"media_id": MEDIA_ID, "uploaded_at": datetime.now(timezone.utc).isoformat()}
                 save_media_state(state)
                 logging.info(f"✅ Uploaded brochure media, id={MEDIA_ID}")
                 return MEDIA_ID
@@ -112,7 +139,7 @@ def ensure_media_up_to_date():
     if media_id and uploaded_at:
         try:
             uploaded_dt = datetime.fromisoformat(uploaded_at)
-            if datetime.utcnow() - uploaded_dt < timedelta(days=MEDIA_EXPIRY_DAYS):
+            if datetime.now(timezone.utc) - uploaded_dt < timedelta(days=MEDIA_EXPIRY_DAYS):
                 MEDIA_ID = media_id
                 need_upload = False
                 logging.info(f"ℹ️ Using existing media_id (uploaded {uploaded_at})")
@@ -160,15 +187,26 @@ else:
         gemini_model = None
         gemini_chat = None
 
-# Initialize OpenAI embeddings for Pinecone (to work with existing data)
+# Manual OpenAI embeddings implementation
+class SimpleOpenAIEmbeddings:
+    def __init__(self, api_key):
+        from openai import OpenAI
+        self.client = OpenAI(api_key=api_key)
+    
+    def embed_query(self, text):
+        response = self.client.embeddings.create(
+            model="text-embedding-3-large",
+            input=text
+        )
+        return response.data[0].embedding
+
+# Initialize OpenAI embeddings for Pinecone
 if not OPENAI_API_KEY:
     logging.error("❌ Missing OpenAI API key! Pinecone search will not work.")
+    openai_embeddings = None
 else:
     try:
-        openai_embeddings = OpenAIEmbeddings(
-            model="text-embedding-3-large",
-            openai_api_key=OPENAI_API_KEY
-        )
+        openai_embeddings = SimpleOpenAIEmbeddings(OPENAI_API_KEY)
         logging.info("✅ OpenAI embeddings configured for Pinecone search")
     except Exception as e:
         logging.error(f"❌ Error initializing OpenAI embeddings: {e}")
@@ -183,7 +221,17 @@ def load_vectorstore():
     if not openai_embeddings:
         logging.error("❌ OpenAI embeddings not available for Pinecone")
         return None
-    return PineconeVectorStore(index_name=INDEX_NAME, embedding=openai_embeddings)
+    try:
+        # Initialize Pinecone
+        pc = Pinecone(api_key=PINECONE_API_KEY)
+        index = pc.Index(INDEX_NAME)
+        
+        # Create LangChain Pinecone vectorstore
+        vectorstore = LangchainPinecone(index, openai_embeddings.embed_query, "text")
+        return vectorstore
+    except Exception as e:
+        logging.error(f"❌ Error creating Pinecone vectorstore: {e}")
+        return None
 
 try:
     vectorstore = load_vectorstore()
@@ -580,8 +628,8 @@ def send_whatsapp_location(to_phone):
         "location": {
             "latitude": "23.0433468",
             "longitude": "72.4594457",
-            "name": "Brookstone",
-            "address": "Brookstone, Vaikunth Bungalows, Beside DPS Bopal Rd, next to A. Shridhar Oxygen Park, Bopal, Shilaj, Ahmedabad, Gujarat 380058"
+            "name": "Goldie Real Estate",
+            "address": "Goldie Real Estate, Toronto , Canada"
         }
     }
     try:
@@ -593,7 +641,7 @@ def send_whatsapp_location(to_phone):
     except Exception as e:
         logging.error(f"❌ Error sending location: {e}")
 
-def send_whatsapp_document(to_phone, caption="Here is your Brookstone Brochure 📄"):
+def send_whatsapp_document(to_phone, caption="Here is your Brochure 📄"):
     # If we have a valid MEDIA_ID, send the document by media id, otherwise fallback to link
     url = f"https://graph.facebook.com/v23.0/{WHATSAPP_PHONE_NUMBER_ID}/messages"
     headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
@@ -603,7 +651,7 @@ def send_whatsapp_document(to_phone, caption="Here is your Brookstone Brochure �
             "messaging_product": "whatsapp",
             "to": to_phone,
             "type": "document",
-            "document": {"id": MEDIA_ID, "caption": caption, "filename": "Brookstone_Brochure.pdf"}
+            "document": {"id": MEDIA_ID, "caption": caption, "filename": "Goldie_Real_Estate_Brochure.pdf"}
         }
     else:
         # fallback to sending by link if media id is not available
@@ -611,7 +659,7 @@ def send_whatsapp_document(to_phone, caption="Here is your Brookstone Brochure �
             "messaging_product": "whatsapp",
             "to": to_phone,
             "type": "document",
-            "document": {"link": BROCHURE_URL, "caption": caption, "filename": "Brookstone_Brochure.pdf"}
+            "document": {"link": BROCHURE_URL, "caption": caption, "filename": "Goldie_Real_Estate_Brochure.pdf"}
         }
 
     try:
@@ -701,13 +749,13 @@ def process_incoming_message(from_phone, message_text, message_id):
     # Check if this is the first message and send welcome
     if state.get("is_first_message", True):
         state["is_first_message"] = False
-        welcome_text = "Hello! Welcome to Brookstone. How could I assist you today? 🏠✨"
+        welcome_text = "Hello! Welcome to Goldie Real Estate. How could I assist you today? 🏠✨"
         if state["language"] == "gujarati":
             welcome_text = translate_english_to_gujarati(welcome_text)
         send_whatsapp_text(from_phone, welcome_text)
         
         # >>> Added for WorkVEU CRM Integration <<<
-        push_to_workveu(name="Brookstone Bot", wa_id=from_phone, message_text=welcome_text, direction="outbound")
+        push_to_workveu(name="Goldie Real Estate Bot", wa_id=from_phone, message_text=welcome_text, direction="outbound")
         return
 
     # 🗺️ PRIORITY: Check for location requests first (using Gemini AI detection)
@@ -716,37 +764,7 @@ def process_incoming_message(from_phone, message_text, message_id):
         send_whatsapp_location(from_phone)
         return
 
-    # 📄 PRIORITY: Check for direct brochure requests (Enhanced Gujarati Support)
-    brochure_keywords = ["brochure", "pdf", "document", "file", "download", "send", "details", "ब्रोशर", "બ્રોશર"]
-    gujarati_action_words = ["મોકલો", "આપો", "મોકલાવો", "મોકલ", "આપ", "જોઈએ", "પાઠવો", "મેળવવા", "લેવા"]
-    
-    # Check for Gujarati brochure requests specifically
-    if "બ્રોશર" in message_text:
-        # If user mentions "બ્રોશર" in any context, send the brochure immediately
-        logging.info(f"📄 Gujarati brochure request detected from {from_phone} - 'બ્રોશર' found")
-        send_whatsapp_document(from_phone)
-        brochure_sent_text = "📄 Here's your Brookstone brochure with complete details! ✨ Any questions after reviewing it? 🏠😊"
-        if state["language"] == "gujarati":
-            brochure_sent_text = translate_english_to_gujarati(brochure_sent_text)
-        send_whatsapp_text(from_phone, brochure_sent_text)
-        
-        # >>> Added for WorkVEU CRM Integration <<<
-        push_to_workveu(name="Brookstone Bot", wa_id=from_phone, message_text=f"📄 Brochure sent + {brochure_sent_text}", direction="outbound")
-        return
-    
-    # Check for English brochure requests
-    if any(keyword in message_text.lower() for keyword in brochure_keywords):
-        if any(word in message_text.lower() for word in ["send", "share", "give", "want", "need", "show"] + gujarati_action_words):
-            logging.info(f"📄 Direct brochure request detected from {from_phone}")
-            send_whatsapp_document(from_phone)
-            brochure_sent_text = "📄 Here's your Brookstone brochure with complete details! ✨ Any questions after reviewing it? 🏠😊"
-            if state["language"] == "gujarati":
-                brochure_sent_text = translate_english_to_gujarati(brochure_sent_text)
-            send_whatsapp_text(from_phone, brochure_sent_text)
-            
-            # >>> Added for WorkVEU CRM Integration <<<
-            push_to_workveu(name="Brookstone Bot", wa_id=from_phone, message_text=f"📄 Brochure sent + {brochure_sent_text}", direction="outbound")
-            return
+    # Let AI model handle all intent detection intelligently instead of keyword matching
 
     # Analyze user interests for better follow-up questions (using Gemini)
     current_interests = analyze_user_interests_with_gemini(message_text, state)
@@ -762,7 +780,7 @@ def process_incoming_message(from_phone, message_text, message_id):
             state["waiting_for"] = None
             state["last_follow_up"] = None  # Clear previous follow-up
             send_whatsapp_document(from_phone)
-            brochure_text = "📄 Here's your Brookstone brochure! It has all the details you need. Any questions after going through it? ✨😊"
+            brochure_text = "📄 Here's your Goldie Real Estate brochure! It has all the details you need. Any questions after going through it? ✨😊"
             if state["language"] == "gujarati":
                 brochure_text = translate_english_to_gujarati(brochure_text)
             send_whatsapp_text(from_phone, brochure_text)
@@ -773,13 +791,13 @@ def process_incoming_message(from_phone, message_text, message_id):
         elif any(word in message_lower for word in ["no", "not now", "later", "નહીં", "ના"]):
             state["waiting_for"] = None
             state["last_follow_up"] = None  # Clear previous follow-up
-            later_text = "Sure! Let me know if you'd like the brochure later or have any other questions about Brookstone. 🏠😊"
+            later_text = "Sure! Let me know if you'd like the brochure later or have any other questions about Goldie Real Estate. 🏠😊"
             if state["language"] == "gujarati":
                 later_text = translate_english_to_gujarati(later_text)
             send_whatsapp_text(from_phone, later_text)
             
             # >>> Added for WorkVEU CRM Integration <<<
-            push_to_workveu(name="Brookstone Bot", wa_id=from_phone, message_text=later_text, direction="outbound")
+            push_to_workveu(name="Goldie Real Estate Bot", wa_id=from_phone, message_text=later_text, direction="outbound")
             return
     
     # Handle ambiguous responses (when user says "sure" but it's unclear what they want)
@@ -794,7 +812,7 @@ def process_incoming_message(from_phone, message_text, message_id):
             send_whatsapp_text(from_phone, clarify_text)
             
             # >>> Added for WorkVEU CRM Integration <<<
-            push_to_workveu(name="Brookstone Bot", wa_id=from_phone, message_text=clarify_text, direction="outbound")
+            push_to_workveu(name="Goldie Real Estate Bot", wa_id=from_phone, message_text=clarify_text, direction="outbound")
             return
         # Check if user wants site visit
         elif any(word in message_lower for word in ["visit", "site", "see", "tour", "book", "appointment", "schedule", "મુલાકાત", "સાઇટ"]):
@@ -806,7 +824,7 @@ def process_incoming_message(from_phone, message_text, message_id):
             send_whatsapp_text(from_phone, visit_text)
             
             # >>> Added for WorkVEU CRM Integration <<<
-            push_to_workveu(name="Brookstone Bot", wa_id=from_phone, message_text=visit_text, direction="outbound")
+            push_to_workveu(name="Goldie Real Estate Bot", wa_id=from_phone, message_text=visit_text, direction="outbound")
             return
         else:
             # If still unclear, ask again
@@ -817,7 +835,7 @@ def process_incoming_message(from_phone, message_text, message_id):
             send_whatsapp_text(from_phone, unclear_text)
             
             # >>> Added for WorkVEU CRM Integration <<<
-            push_to_workveu(name="Brookstone Bot", wa_id=from_phone, message_text=unclear_text, direction="outbound")
+            push_to_workveu(name="Goldie Real Estate Bot", wa_id=from_phone, message_text=unclear_text, direction="outbound")
             return
 
     if not retriever:
@@ -827,7 +845,7 @@ def process_incoming_message(from_phone, message_text, message_id):
         send_whatsapp_text(from_phone, error_text)
         
         # >>> Added for WorkVEU CRM Integration <<<
-        push_to_workveu(name="Brookstone Bot", wa_id=from_phone, message_text=error_text, direction="outbound")
+        push_to_workveu(name="Goldie Real Estate Bot", wa_id=from_phone, message_text=error_text, direction="outbound")
         return
 
     try:
@@ -962,7 +980,7 @@ def process_incoming_message(from_phone, message_text, message_id):
             language_instruction = "IMPORTANT: User is asking in Gujarati. Respond in ENGLISH first (keep it VERY SHORT), then it will be translated to Gujarati automatically. The Gujarati translation should also be brief and concise."
         
         system_prompt = f"""
-You are a friendly real estate assistant for Brookstone project. Be conversational, natural, and convincing.
+You are a friendly real estate assistant for Goldie Real Estate project. Be conversational, natural, and convincing.
 
 {language_instruction}
 
@@ -990,12 +1008,12 @@ CRITICAL AREA TERMINOLOGY RULE:
 MEMORY CONTEXT: {follow_up_memory}{conversation_context}{preferences_context}
 
 SMART FLAT MENTIONS:
-- ONLY mention "Brookstone offers luxurious 3&4BHK flats" when user specifically asks about:
+- ONLY mention "Goldie Real Estate offers luxurious 3&4BHK flats" when user specifically asks about:
   * Flat types/configurations (3BHK, 4BHK)
   * "What do you have?" / "What's available?"
   * Property types or unit options
   * First-time inquiries about the project
-- Whether user asks about 3BHK or whether user asks about 4BHK, mention both types "We have luxurious 3&4BHK flats available at Brookstone!"
+- Whether user asks about 3BHK or whether user asks about 4BHK, mention both types "We have luxurious 3&4BHK flats available at Goldie Real Estate!"
 - Do NOT force this phrase into every response - be natural and contextual
 - For queries about amenities, location, pricing, etc. - just answer directly without mentioning flat types
 
@@ -1008,7 +1026,7 @@ RESPONSE LENGTH RULES:
 BROCHURE STRATEGY:
 - offer brochure as a follow-up when user shows interest in details, layout, floor plans, specifications, amenities after answering from retrieved context
 - Use phrases like "Would you like me to send you our detailed brochure?" 
-- The brochure contains complete information about Brookstone's luxury offerings
+- The brochure contains complete information about Goldie Real Estate's luxury offerings
 - Make brochure sound valuable and comprehensive
 
 SPECIAL HANDLING:
@@ -1027,7 +1045,7 @@ IMPORTANT: Do NOT handle location/address requests here - they are processed sep
 
 CONVINCING STRATEGY:
 - Use positive, enthusiastic language
-- Highlight luxury and quality aspects
+- Highlight luxury and quality aspects of Goldie Real Estate
 - Create urgency subtly ("perfect time to visit", "great opportunity")
 - Use emojis that convey excitement: 🏠✨🌟💎🎉😊🔥💫
 
@@ -1048,7 +1066,7 @@ CONVERSATION FLOW:
 - If user is answering my previous question, provide relevant info based on their response
 - Then naturally continue with another relevant question
 - Keep the conversation engaging and helpful
-- Always sound excited about Brookstone!
+- Always sound excited about Goldie Real Estate!
 
 Example Responses (be contextual, not repetitive):
 - When user asks about flat types: "Yes! We have luxury 3&4BHK flats 🏠 Which interests you more? ✨"
@@ -1064,7 +1082,7 @@ Available Knowledge Context:
 
 User Question: {search_query}
 
-IMPORTANT: Be natural and contextual. Don't force "Brookstone offers luxurious 3&4BHK flats" into every response. Only mention flat types when the user specifically asks about configurations, availability, or what types of units you have.
+IMPORTANT: Be natural and contextual. Don't force "Goldie Real Estate offers luxurious 3&4BHK flats" into every response. Only mention flat types when the user specifically asks about configurations, availability, or what types of units you have.
 
 KEEP RESPONSES VERY SHORT - Maximum 1-2 sentences + 1 simple follow-up question.
 Assistant:
@@ -1078,7 +1096,7 @@ Assistant:
             send_whatsapp_text(from_phone, error_text)
             
             # >>> Added for WorkVEU CRM Integration <<<
-            push_to_workveu(name="Brookstone Bot", wa_id=from_phone, message_text=error_text, direction="outbound")
+            push_to_workveu(name="Goldie Real Estate Bot", wa_id=from_phone, message_text=error_text, direction="outbound")
             return
 
         response = gemini_chat.invoke(system_prompt).content.strip()
@@ -1114,7 +1132,7 @@ Assistant:
         send_whatsapp_text(from_phone, final_response)
 
         # >>> Added for WorkVEU CRM Integration <<<
-        push_to_workveu(name="Brookstone Bot", wa_id=from_phone, message_text=final_response, direction="outbound")
+        push_to_workveu(name="Goldie Real Estate Bot", wa_id=from_phone, message_text=final_response, direction="outbound")
 
         # Store the follow-up question asked by the bot for memory
         # Extract follow-up question from response (look for question marks)
@@ -1241,8 +1259,12 @@ def health():
 
 @app.route("/", methods=["GET"])
 def home():
-    return jsonify({
-        "message": "Brookstone WhatsApp RAG Bot is running!",
-        "brochure_url": BROCHURE_URL,
-        "endpoints": {"webhook": "/webhook", "health": "/health"}
-    }), 200
+    return "<h1>Goldie Real Estate WhatsApp Bot</h1><p>Bot is running successfully!</p>"
+
+# ================================================
+# RUN APP
+# ================================================
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", 5000))
+    logging.info(f"🚀 Starting Goldie Real Estate WhatsApp Bot on port {port}")
+    app.run(host="0.0.0.0", port=port, debug=False)
