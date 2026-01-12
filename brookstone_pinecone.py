@@ -1259,7 +1259,7 @@ def webhook():
 
 @app.route("/health", methods=["GET"])
 def health():
-    return "OK", 200
+    return jsonify({"status": "healthy"}), 200
 
 
 @app.route("/", methods=["GET"])

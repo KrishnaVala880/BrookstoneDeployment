@@ -4,11 +4,12 @@ import logging
 from flask import Flask, request, jsonify
 import requests
 from dotenv import load_dotenv
-from langchain_pinecone import PineconeVectorStore
+from pinecone import Pinecone
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
-from langchain_community.embeddings import OpenAIEmbeddings
+# from langchain_openai import OpenAIEmbeddings
+from langchain_community.vectorstores import Pinecone as LangchainPinecone
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import google.generativeai as genai
 
 load_dotenv()
@@ -60,12 +61,38 @@ def _find_brochure_file():
     # common locations
     candidates = [
         os.path.join(os.path.dirname(__file__), "static", "brochure", "BROOKSTONE.pdf"),
+        os.path.join(os.path.dirname(__file__), "static", "brochure", "BROOKSTONE .pdf"),
         os.path.join(os.path.dirname(__file__), "static", "BROCHURE.pdf"),
+        os.path.join(os.path.dirname(__file__), "static", "BROOKSTONE .pdf"),
         os.path.join(os.path.dirname(__file__), "BROOKSTONE.pdf"),
+        os.path.join(os.path.dirname(__file__), "BROOKSTONE .pdf"),
+        os.path.join(os.path.dirname(__file__), "brochure.pdf"),
+        os.path.join(os.path.dirname(__file__), "Brookstone.pdf"),
+        "BROOKSTONE.pdf",
+        "BROOKSTONE .pdf",
+        "brochure.pdf",
+        "Brookstone.pdf"
     ]
     for c in candidates:
         if os.path.exists(c):
+            logging.info(f"✅ Found brochure file at: {c}")
             return c
+    
+    # Search for any PDF file in current directory as fallback
+    current_dir = os.path.dirname(__file__)
+    try:
+        files = os.listdir(current_dir)
+        pdf_files = [f for f in files if f.lower().endswith('.pdf')]
+        if pdf_files:
+            # Use the first PDF file found
+            fallback_file = os.path.join(current_dir, pdf_files[0])
+            logging.info(f"✅ Using fallback PDF file: {fallback_file}")
+            return fallback_file
+        logging.info(f"📁 Current directory: {current_dir}")
+        logging.info(f"📄 No PDF files found in directory")
+    except Exception as e:
+        logging.error(f"❌ Error listing directory: {e}")
+    
     return None
 
 
@@ -89,7 +116,7 @@ def upload_brochure_media():
             new_media_id = j.get("id")
             if new_media_id:
                 MEDIA_ID = new_media_id
-                state = {"media_id": MEDIA_ID, "uploaded_at": datetime.utcnow().isoformat()}
+                state = {"media_id": MEDIA_ID, "uploaded_at": datetime.now(timezone.utc).isoformat()}
                 save_media_state(state)
                 logging.info(f"✅ Uploaded brochure media, id={MEDIA_ID}")
                 return MEDIA_ID
@@ -112,7 +139,7 @@ def ensure_media_up_to_date():
     if media_id and uploaded_at:
         try:
             uploaded_dt = datetime.fromisoformat(uploaded_at)
-            if datetime.utcnow() - uploaded_dt < timedelta(days=MEDIA_EXPIRY_DAYS):
+            if datetime.now(timezone.utc) - uploaded_dt < timedelta(days=MEDIA_EXPIRY_DAYS):
                 MEDIA_ID = media_id
                 need_upload = False
                 logging.info(f"ℹ️ Using existing media_id (uploaded {uploaded_at})")
@@ -160,15 +187,26 @@ else:
         gemini_model = None
         gemini_chat = None
 
-# Initialize OpenAI embeddings for Pinecone (to work with existing data)
+# Manual OpenAI embeddings implementation
+class SimpleOpenAIEmbeddings:
+    def __init__(self, api_key):
+        from openai import OpenAI
+        self.client = OpenAI(api_key=api_key)
+    
+    def embed_query(self, text):
+        response = self.client.embeddings.create(
+            model="text-embedding-3-large",
+            input=text
+        )
+        return response.data[0].embedding
+
+# Initialize OpenAI embeddings for Pinecone
 if not OPENAI_API_KEY:
     logging.error("❌ Missing OpenAI API key! Pinecone search will not work.")
+    openai_embeddings = None
 else:
     try:
-        openai_embeddings = OpenAIEmbeddings(
-            model="text-embedding-3-large",
-            openai_api_key=OPENAI_API_KEY
-        )
+        openai_embeddings = SimpleOpenAIEmbeddings(OPENAI_API_KEY)
         logging.info("✅ OpenAI embeddings configured for Pinecone search")
     except Exception as e:
         logging.error(f"❌ Error initializing OpenAI embeddings: {e}")
@@ -183,7 +221,17 @@ def load_vectorstore():
     if not openai_embeddings:
         logging.error("❌ OpenAI embeddings not available for Pinecone")
         return None
-    return PineconeVectorStore(index_name=INDEX_NAME, embedding=openai_embeddings)
+    try:
+        # Initialize Pinecone
+        pc = Pinecone(api_key=PINECONE_API_KEY)
+        index = pc.Index(INDEX_NAME)
+        
+        # Create LangChain Pinecone vectorstore
+        vectorstore = LangchainPinecone(index, openai_embeddings.embed_query, "text")
+        return vectorstore
+    except Exception as e:
+        logging.error(f"❌ Error creating Pinecone vectorstore: {e}")
+        return None
 
 try:
     vectorstore = load_vectorstore()
@@ -1198,16 +1246,21 @@ def webhook():
 
     return jsonify({"status": "ok"}), 200
 
+# @app.route("/health", methods=["GET"])
+# def health():
+#     return jsonify({
+#         "status": "healthy",
+#         "whatsapp_configured": bool(WHATSAPP_TOKEN and WHATSAPP_PHONE_NUMBER_ID),
+#         "gemini_configured": bool(GEMINI_API_KEY and gemini_model and gemini_chat),
+#         "pinecone_configured": bool(PINECONE_API_KEY and openai_embeddings),
+#         "workveu_configured": bool(WORKVEU_WEBHOOK_URL and WORKVEU_API_KEY),
+#         "hybrid_mode": "Gemini for chat, OpenAI for search"
+#     }), 200
+
 @app.route("/health", methods=["GET"])
 def health():
-    return jsonify({
-        "status": "healthy",
-        "whatsapp_configured": bool(WHATSAPP_TOKEN and WHATSAPP_PHONE_NUMBER_ID),
-        "gemini_configured": bool(GEMINI_API_KEY and gemini_model and gemini_chat),
-        "pinecone_configured": bool(PINECONE_API_KEY and openai_embeddings),
-        "workveu_configured": bool(WORKVEU_WEBHOOK_URL and WORKVEU_API_KEY),
-        "hybrid_mode": "Gemini for chat, OpenAI for search"
-    }), 200
+    return "OK", 200
+
 
 @app.route("/", methods=["GET"])
 def home():
