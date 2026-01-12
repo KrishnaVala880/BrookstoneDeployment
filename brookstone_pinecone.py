@@ -1246,16 +1246,21 @@ def webhook():
 
     return jsonify({"status": "ok"}), 200
 
+# @app.route("/health", methods=["GET"])
+# def health():
+#     return jsonify({
+#         "status": "healthy",
+#         "whatsapp_configured": bool(WHATSAPP_TOKEN and WHATSAPP_PHONE_NUMBER_ID),
+#         "gemini_configured": bool(GEMINI_API_KEY and gemini_model and gemini_chat),
+#         "pinecone_configured": bool(PINECONE_API_KEY and openai_embeddings),
+#         "workveu_configured": bool(WORKVEU_WEBHOOK_URL and WORKVEU_API_KEY),
+#         "hybrid_mode": "Gemini for chat, OpenAI for search"
+#     }), 200
+
 @app.route("/health", methods=["GET"])
 def health():
-    return jsonify({
-        "status": "healthy",
-        "whatsapp_configured": bool(WHATSAPP_TOKEN and WHATSAPP_PHONE_NUMBER_ID),
-        "gemini_configured": bool(GEMINI_API_KEY and gemini_model and gemini_chat),
-        "pinecone_configured": bool(PINECONE_API_KEY and openai_embeddings),
-        "workveu_configured": bool(WORKVEU_WEBHOOK_URL and WORKVEU_API_KEY),
-        "hybrid_mode": "Gemini for chat, OpenAI for search"
-    }), 200
+    return "OK", 200
+
 
 @app.route("/", methods=["GET"])
 def home():
